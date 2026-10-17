@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<!--
+  AI BIRT — UI-бандл плагина «ИИ-конструктор отчётов»:
+    - панель чата (Window → Show View → ИИ → «ИИ-конструктор отчётов»),
+      она же добавляется в перспективу «Отчёт» BIRT;
+    - страница настроек (Window → Preferences → «ИИ-конструктор отчётов»).
+-->
+<plugin>
+
+   <extension point="org.eclipse.ui.views">
+      <category
+            id="com.aisql.birt.ui.category"
+            name="%viewCategory.name"/>
+      <view
+            id="com.aisql.birt.ui.chatView"
+            category="com.aisql.birt.ui.category"
+            class="com.aisql.birt.ui.ChatView"
+            name="%view.name"
+            restorable="true"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.preferencePages">
+      <page
+            id="com.aisql.birt.ui.preferencePage"
+            class="com.aisql.birt.ui.AiBirtPreferencePage"
+            name="%prefPage.name"/>
+   </extension>
+
+   <!-- Панель чата в перспективе BIRT «Отчёт». -->
+   <extension point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension
+            targetID="org.eclipse.birt.report.designer.ui.ReportPerspective">
+         <view
+               id="com.aisql.birt.ui.chatView"
+               relationship="right"
+               relative="org.eclipse.ui.views.ContentOutline"/>
+      </perspectiveExtension>
+   </extension>
+
+</plugin>
