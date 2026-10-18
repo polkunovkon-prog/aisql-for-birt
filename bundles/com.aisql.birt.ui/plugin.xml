@@ -38,4 +38,17 @@
       </perspectiveExtension>
    </extension>
 
+   <!-- Headless-приложение самопроверки: спецификация → .rptdesign → PDF/HTML. -->
+   <extension
+         id="aibirtSelftest"
+         point="org.eclipse.core.runtime.applications">
+      <application
+            cardinality="singleton-global"
+            thread="main"
+            visible="false">
+         <run
+               class="com.aisql.birt.ui.AiBirtSelftestApplication"/>
+      </application>
+   </extension>
+
 </plugin>

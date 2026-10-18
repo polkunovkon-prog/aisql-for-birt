@@ -1,0 +1,52 @@
+{
+  "report": {
+    "name": "students_by_house",
+    "title": "Студенты Хогвартса по факультетам",
+    "page": {
+      "format": "A4",
+      "orientation": "portrait",
+      "margins_mm": { "top": 10, "right": 10, "bottom": 10, "left": 15 }
+    }
+  },
+  "parameters": [
+    { "name": "house_code", "type": "string", "prompt": "Код факультета («%» — все)", "default": "%" }
+  ],
+  "datasources": [
+    {
+      "name": "dsHogwarts",
+      "kind": "jdbc",
+      "driver": "org.postgresql.Driver",
+      "url": "jdbc:postgresql://127.0.0.1:5432/hogwarts",
+      "user": "agent_user"
+    }
+  ],
+  "datasets": [
+    {
+      "name": "dsStudents",
+      "datasource": "dsHogwarts",
+      "sql": "select p.last_name, p.first_name, h.name as house_name, h.code as house_code, s.grade_level from students s join people p on p.id = s.person_id join houses h on h.id = s.house_id where (? = '%' or h.code = ?) order by s.grade_level, p.last_name",
+      "params": ["house_code", "house_code"],
+      "columns": [
+        { "name": "last_name", "type": "string" },
+        { "name": "first_name", "type": "string" },
+        { "name": "house_name", "type": "string" },
+        { "name": "house_code", "type": "string" },
+        { "name": "grade_level", "type": "integer" }
+      ]
+    }
+  ],
+  "body": [
+    { "type": "label", "text": "Студенты Хогвартса по факультетам", "size_pt": 14, "bold": true, "align": "center" },
+    { "type": "label", "text": "Отчёт сформирован плагином «ИИ-конструктор отчётов» (BIRT 4.7)", "size_pt": 9, "align": "center" },
+    {
+      "type": "table",
+      "dataset": "dsStudents",
+      "columns": [
+        { "header": "Фамилия", "expr": "row[\"last_name\"]", "width_mm": 35 },
+        { "header": "Имя", "expr": "row[\"first_name\"]", "width_mm": 30 },
+        { "header": "Факультет", "expr": "row[\"house_name\"]", "width_mm": 45 },
+        { "header": "Курс", "expr": "row[\"grade_level\"]", "width_mm": 20, "align": "center" }
+      ]
+    }
+  ]
+}

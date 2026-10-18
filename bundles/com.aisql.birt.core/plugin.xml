@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<!--
+  AI BIRT — ядро плагина «ИИ-конструктор отчётов» (BIRT 4.7).
+
+  Здесь регистрируется фабрика JDBC-соединений PostgreSQL: штатный драйвер
+  в составе BIRT (42.0.0) не умеет SCRAM-SHA-256, поэтому плагин приносит
+  современный драйвер с собой (lib/postgresql-42.7.3.jar) и подключается
+  через публичную точку расширения BIRT. BIRT при этом не изменяется.
+-->
+<plugin>
+
+   <extension point="org.eclipse.birt.report.data.oda.jdbc.driverinfo">
+      <jdbcDriver
+            name="PostgreSQL (драйвер из комплекта AI BIRT)"
+            driverClass="org.postgresql.Driver"
+            connectionFactory="com.aisql.birt.core.jdbc.PgJdbcConnectionFactory"
+            urlTemplate="jdbc:postgresql://&lt;хост&gt;:5432/&lt;база&gt;"/>
+   </extension>
+
+</plugin>

@@ -16,7 +16,10 @@ JAVA="${JAVA:-/home/pka/opt/jdk8u504-b01/bin/java}"
 echo "== Сборка бандлов =="
 "$ROOT/releng/build.sh" | tail -5
 
-CP="$ROOT/build/com.aisql.birt.core/classes"
+# Classpath: классы ядра + библиотеки BIRT (модель, ICU и т.д.) для
+# тестов сборки отчёта. Набор печатает releng/birt-classpath.sh.
+BIRT_CP="$("$ROOT/releng/birt-classpath.sh")"
+CP="$ROOT/build/com.aisql.birt.core/classes:$BIRT_CP"
 TEST_OUT="$ROOT/build/tests"
 rm -rf "$TEST_OUT"
 mkdir -p "$TEST_OUT"

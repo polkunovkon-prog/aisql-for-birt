@@ -34,6 +34,8 @@ public final class AllTests {
         ChatHistoryTest.run();
         AuditLogTest.run();
         LlmClientTest.run();
+        ReportSpecTest.run();
+        ReportBuilderTest.run();
 
         int code = T.summary();
         System.out.println(code == 0 ? "ИТОГ: все проверки пройдены." : "ИТОГ: есть ошибки.");

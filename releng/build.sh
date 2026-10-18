@@ -44,8 +44,13 @@ echo "== Сборка AI BIRT v$VERSION =="
 echo "Eclipse: $ECLIPSE_HOME"
 echo "JDK:     $("$JAVAC" -version 2>&1)"
 
-# Classpath: все jar-ы плагинов Eclipse.
+# Classpath: все jar-ы плагинов Eclipse + вложенные jar-ы отдельных бандлов
+# (интерфейсы JDBC-ODA лежат в org.eclipse.birt.report.data.oda.jdbc/oda-jdbc.jar).
 CP="$(find "$PLUGINS_DIR" -maxdepth 1 -name '*.jar' | sort | tr '\n' ':')"
+ODA_JAR="$(ls -d "$PLUGINS_DIR"/org.eclipse.birt.report.data.oda.jdbc_*/oda-jdbc.jar 2>/dev/null | head -1 || true)"
+if [ -n "$ODA_JAR" ]; then
+    CP="$CP$ODA_JAR:"
+fi
 DEPS_CP=""
 
 rm -rf "$OUT"
@@ -87,7 +92,7 @@ for BUNDLE in com.aisql.birt.core com.aisql.birt.ui; do
     cp "$OUT/$BUNDLE/tmp.jar" "$JARROOT/bundle.jar"
     (cd "$JARROOT" && "$JAR" xf bundle.jar && rm bundle.jar)
     cp "$SRC/plugin.xml" "$JARROOT/plugin.xml" 2>/dev/null || true
-    for d in OSGI-INF icons schema; do
+    for d in OSGI-INF icons schema lib; do
         if [ -d "$SRC/$d" ]; then
             cp -r "$SRC/$d" "$JARROOT/"
         fi
