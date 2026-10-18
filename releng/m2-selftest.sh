@@ -88,5 +88,27 @@ if command -v pdfinfo >/dev/null 2>&1; then
     fi
 fi
 
+# Текст в PDF: кириллица должна извлекаться — значит, в PDF встроен
+# настоящий шрифт с кириллицей (DejaVu Sans), а не базовый невстраиваемый
+# Times-Roman, в котором русский текст теряется.
+if command -v pdftotext >/dev/null 2>&1; then
+    PDFTXT="$(pdftotext -layout "$PDF" - 2>/dev/null || true)"
+    for token in $EXPECT; do
+        if printf '%s' "$PDFTXT" | grep -q "$token"; then
+            echo "Данные в PDF: найдено «$token»"
+        else
+            echo "ОШИБКА: в PDF нет «$token» (шрифт не встроен, кириллица теряется?)" >&2
+            exit 1
+        fi
+    done
+    if command -v pdffonts >/dev/null 2>&1; then
+        if pdffonts "$PDF" | tail -n +3 | grep -q 'yes'; then
+            echo "PDF: есть встроенные шрифты"
+        else
+            echo "ПРЕДУПРЕЖДЕНИЕ: в PDF нет встроенных шрифтов" >&2
+        fi
+    fi
+fi
+
 echo
 echo "== Приёмка M2 пройдена =="

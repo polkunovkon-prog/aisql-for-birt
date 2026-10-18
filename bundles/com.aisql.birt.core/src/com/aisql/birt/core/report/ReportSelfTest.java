@@ -108,6 +108,16 @@ public final class ReportSelfTest {
             Level level = levelName == null || levelName.isEmpty()
                 ? Level.WARNING : Level.parse(levelName);
             config.setLogConfig(outDir.getAbsolutePath(), level);
+
+            // Шрифты PDF: конфигурация передаётся движку штатным API
+            // EngineConfig.setFontConfig; без неё в PDF нет кириллицы
+            // (движок берёт невстраиваемый Times-Roman).
+            if (PdfFonts.applyTo(config)) {
+                out.println("SELFTEST: FONTS OK (DejaVu Sans)");
+            } else {
+                out.println("SELFTEST: WARN ресурс конфигурации шрифтов не найден");
+            }
+
             engine = new ReportEngine(config);
 
             File pdf = new File(outDir, spec.name() + ".pdf");

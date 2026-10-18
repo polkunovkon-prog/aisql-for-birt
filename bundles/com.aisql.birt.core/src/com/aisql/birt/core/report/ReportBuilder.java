@@ -66,6 +66,16 @@ public final class ReportBuilder {
     private static final String ODA_JDBC_DATA_SOURCE = "org.eclipse.birt.report.data.oda.jdbc";
     private static final String ODA_JDBC_DATA_SET = "org.eclipse.birt.report.data.oda.jdbc.JdbcSelectDataSet";
 
+    /**
+     * Шрифт всех текстовых элементов отчёта. Задаётся явно, чтобы PDF-эмиттер
+     * BIRT встраивал в файл настоящий TrueType-шрифт (Identity-H). Если шрифт
+     * не указан, движок подставляет базовые PDF-шрифты (Times/Helvetica),
+     * которые не встраиваются и не содержат кириллицы — русский текст в PDF
+     * пропадает (проверено на BIRT 4.7: остаются только цифры и рамки).
+     * DejaVu Sans есть в типовых поставках Linux и виден JVM через fontconfig.
+     */
+    private static final String FONT_FAMILY = "DejaVu Sans";
+
     private static final Map<String, String> PAGE_SIZES = new HashMap<String, String>();
     private static final Map<String, String> PARAM_TYPES = new HashMap<String, String>();
 
@@ -309,6 +319,7 @@ public final class ReportBuilder {
             throws Exception {
         LabelHandle label = factory.newLabel(name);
         label.setText(el.text());
+        label.setProperty("fontFamily", FONT_FAMILY);
         if (el.sizePt() != null) {
             label.setProperty("fontSize", fmtMm(el.sizePt()) + "pt");
         }
@@ -365,12 +376,14 @@ public final class ReportBuilder {
 
             LabelHandle head = factory.newLabel(name + "_h" + (i + 1));
             head.setText(col.header());
+            head.setProperty("fontFamily", FONT_FAMILY);
             head.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
             head.setProperty("textAlign", col.align() == null ? "left" : col.align());
             CellHandle hc = (CellHandle) header.getCells().get(i);
             hc.getContent().add(head);
 
             DataItemHandle item = factory.newDataItem(name + "_d" + (i + 1));
+            item.setProperty("fontFamily", FONT_FAMILY);
             if (col.resultColumn() != null) {
                 item.setResultSetColumn(col.resultColumn());
             } else {

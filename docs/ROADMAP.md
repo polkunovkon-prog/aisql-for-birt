@@ -27,9 +27,13 @@
   собранный отчёт открывается в редакторе BIRT;
 - комплектный драйвер PostgreSQL 42.7.3 через точку расширения `driverinfo`
   (PostgreSQL 17/SCRAM работает без замены файлов BIRT);
-- приёмка: `releng/m2-selftest.sh` (сборка + рендер PDF/HTML с проверкой
-  данных) и headless-приложение `com.aisql.birt.ui.aibirtSelftest` внутри
-  Eclipse; готовый ТЗ-промт для базы hogwarts — `docs/TZ-PROMPT-hogwarts.md`.
+- шрифты PDF: текстовым элементам задаётся TrueType-шрифт с кириллицей
+  (`DejaVu Sans`), конфигурация шрифтов передаётся движку штатным
+  `EngineConfig.setFontConfig` — PDF со встроенными шрифтами;
+- приёмка: `releng/m2-selftest.sh` (сборка + рендер PDF/HTML, проверка
+  данных в HTML и кириллицы в PDF) и headless-приложение
+  `com.aisql.birt.ui.aibirtSelftest` внутри Eclipse; готовый ТЗ-промт
+  для базы hogwarts — `docs/TZ-PROMPT-hogwarts.md`.
 
 Осталось в M2 (следующая итерация):
 

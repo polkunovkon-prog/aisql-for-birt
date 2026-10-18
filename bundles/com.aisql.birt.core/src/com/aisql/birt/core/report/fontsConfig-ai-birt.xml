@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	AI BIRT — конфигурация шрифтов для PDF-эмиттера BIRT 4.7.
+
+	Подключается через FontMappingManagerFactory.setCustomFontConfig(URL)
+	(см. com.aisql.birt.core.report.PdfFonts): активатор UI-бандла делает
+	это при старте Eclipse, офлайн-приёмка — перед созданием движка.
+	Формат файла описан в org.eclipse.birt.report.engine.fonts/fontsConfig.xml.
+
+	font-paths   — каталоги TrueType-шрифтов: движок регистрирует их файлы
+	               и может встраивать в PDF (Identity-H). DejaVu/Liberation
+	               содержат кириллицу и есть в типовых поставках Linux.
+	               Несуществующие каталоги движок молча пропускает.
+	all-fonts    — запасной шрифт для текста, которому не нашлось явного
+	               шрифта: старые отчёты без fontFamily тоже получают
+	               кириллицу вместо невстраиваемого Times-Roman.
+-->
+<font>
+	<font-paths>
+		<path path="/usr/share/fonts/truetype/dejavu" />
+		<path path="/usr/share/fonts/truetype/liberation" />
+	</font-paths>
+	<composite-font name="all-fonts" font-family="DejaVu Sans">
+	</composite-font>
+</font>
