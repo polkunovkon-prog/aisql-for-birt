@@ -20,6 +20,9 @@ import java.util.Map;
 
 import com.ibm.icu.util.ULocale;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 import org.eclipse.birt.report.model.api.CachedMetaDataHandle;
 import org.eclipse.birt.report.model.api.CellHandle;
 import org.eclipse.birt.report.model.api.ColumnHandle;
@@ -39,6 +42,7 @@ import org.eclipse.birt.report.model.api.SessionHandle;
 import org.eclipse.birt.report.model.api.SimpleMasterPageHandle;
 import org.eclipse.birt.report.model.api.SlotHandle;
 import org.eclipse.birt.report.model.api.StructureFactory;
+import org.eclipse.birt.report.model.api.TableGroupHandle;
 import org.eclipse.birt.report.model.api.TableHandle;
 import org.eclipse.birt.report.model.api.elements.DesignChoiceConstants;
 import org.eclipse.birt.report.model.api.elements.structures.CachedMetaData;
@@ -150,9 +154,52 @@ public final class ReportBuilder {
     }
 
     // ------------------------------------------------------------------
-    // Страница
+    // Чтение готового файла
     // ------------------------------------------------------------------
 
+    /**
+     * Читает пароль источника данных из готового .rptdesign. BIRT хранит
+     * пароль в скрытом виде; модель возвращает уже расшифрованное значение.
+     * Нужен при правке отчёта, чтобы не спрашивать пароль заново.
+     *
+     * @return пароль или null, если прочитать не удалось
+     */
+    public static String readPassword(File designFile) {
+        if (designFile == null || !designFile.isFile()) {
+            return null;
+        }
+        SessionHandle session = null;
+        try {
+            session = new DesignEngine(new DesignConfig())
+                .newSessionHandle(ULocale.ENGLISH);
+            ReportDesignHandle handle = session.openDesign(designFile.getAbsolutePath());
+            SlotHandle sources = handle.getDataSources();
+            for (int i = 0; i < sources.getCount(); i++) {
+                DesignElementHandle h = sources.get(i);
+                if (h instanceof OdaDataSourceHandle) {
+                    Object pw = h.getProperty("odaPassword");
+                    if (pw instanceof String && !((String) pw).isEmpty()) {
+                        return (String) pw;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // пароль недоступен — вызывающий код спросит его заново
+        } finally {
+            if (session != null) {
+                try {
+                    session.closeAll(false);
+                } catch (Throwable ignored) {
+                    // закрытие сессии не критично
+                }
+            }
+        }
+        return null;
+    }
+
+    // ------------------------------------------------------------------
+    // Страница
+    // ------------------------------------------------------------------
     private static void applyPage(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec) throws Exception {
         if (spec.page() == null) {
@@ -326,6 +373,12 @@ public final class ReportBuilder {
         if (el.bold()) {
             label.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
         }
+        if (el.italic()) {
+            label.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+        }
+        if (el.color() != null) {
+            label.setProperty("color", el.color());
+        }
         if (el.align() != null) {
             label.setProperty("textAlign", el.align());
         }
@@ -353,20 +406,27 @@ public final class ReportBuilder {
         // Привязки столбцов таблицы (boundDataColumns): связывают столбец
         // набора данных с выражением строки. Без них ячейки-данные выходят
         // пустыми, хотя запрос выполняется (проверено на BIRT 4.7).
+        // Для вычисляемых колонок привязка создаётся по каждой ссылке row["..."].
         PropertyHandle bound = table.getPropertyHandle("boundDataColumns");
+        Set<String> boundNames = new LinkedHashSet<String>();
         for (ReportSpec.TableColumn col : cols) {
-            if (col.resultColumn() == null || bound == null) {
-                continue;
+            boundNames.addAll(col.refs());
+        }
+        if (el.groupBy() != null) {
+            boundNames.add(el.groupBy());
+        }
+        if (bound != null) {
+            for (String ref : boundNames) {
+                ComputedColumn cc = new ComputedColumn();
+                cc.setName(ref);
+                cc.setDisplayName(ref);
+                cc.setExpression("dataSetRow[\"" + ref + "\"]");
+                String type = resultColumnType(spec, el, ref);
+                if (type != null) {
+                    cc.setDataType(type);
+                }
+                bound.addItem(cc);
             }
-            ComputedColumn cc = new ComputedColumn();
-            cc.setName(col.resultColumn());
-            cc.setDisplayName(col.resultColumn());
-            cc.setExpression("dataSetRow[\"" + col.resultColumn() + "\"]");
-            String type = resultColumnType(spec, el, col.resultColumn());
-            if (type != null) {
-                cc.setDataType(type);
-            }
-            bound.addItem(cc);
         }
 
         RowHandle header = (RowHandle) table.getHeader().get(0);
@@ -380,6 +440,9 @@ public final class ReportBuilder {
             head.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
             head.setProperty("textAlign", col.align() == null ? "left" : col.align());
             CellHandle hc = (CellHandle) header.getCells().get(i);
+            if (col.headerBackground() != null) {
+                hc.setProperty("backgroundColor", col.headerBackground());
+            }
             hc.getContent().add(head);
 
             DataItemHandle item = factory.newDataItem(name + "_d" + (i + 1));
@@ -392,7 +455,19 @@ public final class ReportBuilder {
             if (col.align() != null) {
                 item.setProperty("textAlign", col.align());
             }
+            if (col.bold()) {
+                item.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+            }
+            if (col.italic()) {
+                item.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+            }
+            if (col.color() != null) {
+                item.setProperty("color", col.color());
+            }
             CellHandle dc = (CellHandle) detail.getCells().get(i);
+            if (col.background() != null) {
+                dc.setProperty("backgroundColor", col.background());
+            }
             dc.getContent().add(item);
 
             if (col.widthMm() != null) {
@@ -400,7 +475,52 @@ public final class ReportBuilder {
                     .setStringValue(fmtMm(col.widthMm()) + "mm");
             }
         }
+
+        if (el.groupBy() != null) {
+            addGroup(factory, table, el, name, cols.size());
+        }
         return table;
+    }
+
+    /** Группировка строк: заголовок группы со значением ключа и (опционально) счётчик. */
+    private static void addGroup(ElementFactory factory, TableHandle table,
+            ReportSpec.Table el, String name, int columnCount) throws Exception {
+        TableGroupHandle group = factory.newTableGroup();
+        group.setKeyExpr("row[\"" + el.groupBy() + "\"]");
+        table.getGroups().add(group);
+
+        RowHandle header = factory.newTableRow(1);
+        CellHandle cell = (CellHandle) header.getCells().get(0);
+        cell.setColumnSpan(columnCount);
+        cell.setProperty("backgroundColor", "#eef2f7");
+
+        LabelHandle caption = factory.newLabel(name + "_gt");
+        caption.setText(el.groupTitle() + ": ");
+        caption.setProperty("fontFamily", FONT_FAMILY);
+        caption.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+        cell.getContent().add(caption);
+
+        DataItemHandle key = factory.newDataItem(name + "_gk");
+        key.setProperty("fontFamily", FONT_FAMILY);
+        key.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+        key.setResultSetColumn(el.groupBy());
+        cell.getContent().add(key);
+        group.getHeader().add(header);
+
+        if (el.groupCount()) {
+            RowHandle footer = factory.newTableRow(1);
+            CellHandle fcell = (CellHandle) footer.getCells().get(0);
+            fcell.setColumnSpan(columnCount);
+            LabelHandle total = factory.newLabel(name + "_gc");
+            total.setText("Всего строк в группе: ");
+            total.setProperty("fontFamily", FONT_FAMILY);
+            fcell.getContent().add(total);
+            DataItemHandle count = factory.newDataItem(name + "_gcnt");
+            count.setProperty("fontFamily", FONT_FAMILY);
+            count.setValueExpr("Total.count()");
+            fcell.getContent().add(count);
+            group.getFooter().add(footer);
+        }
     }
 
     /** Тип столбца набора данных по его имени (для привязки столбцов таблицы). */

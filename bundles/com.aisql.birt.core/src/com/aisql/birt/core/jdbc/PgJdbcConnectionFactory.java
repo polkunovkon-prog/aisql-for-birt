@@ -28,6 +28,23 @@ public class PgJdbcConnectionFactory implements IConnectionFactory {
     /** Драйвер из комплекта плагина (Bundle-ClassPath: lib/postgresql-42.7.3.jar). */
     private static final String PG_DRIVER_CLASS = "org.postgresql.Driver";
 
+    /**
+     * Открывает соединение с базой (для чтения метаданных — схема БД).
+     * Использует тот же путь, что и движок отчётов: сначала драйвер из
+     * комплекта плагина, затем — доступный через DriverManager.
+     */
+    public static Connection open(String url, String user, String password)
+            throws SQLException {
+        Properties props = new Properties();
+        if (user != null && !user.isEmpty()) {
+            props.setProperty("user", user);
+        }
+        if (password != null && !password.isEmpty()) {
+            props.setProperty("password", password);
+        }
+        return new PgJdbcConnectionFactory().getConnection(PG_DRIVER_CLASS, url, props);
+    }
+
     @Override
     public Connection getConnection(String driverClass, String url, Properties props)
             throws SQLException {

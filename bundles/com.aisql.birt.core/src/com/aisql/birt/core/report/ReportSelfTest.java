@@ -20,15 +20,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.logging.Level;
 
-import org.eclipse.birt.core.framework.Platform;
-import org.eclipse.birt.core.framework.PlatformConfig;
-import org.eclipse.birt.report.engine.api.EngineConfig;
-import org.eclipse.birt.report.engine.api.HTMLRenderOption;
 import org.eclipse.birt.report.engine.api.IReportEngine;
-import org.eclipse.birt.report.engine.api.IReportRunnable;
-import org.eclipse.birt.report.engine.api.IRunAndRenderTask;
-import org.eclipse.birt.report.engine.api.PDFRenderOption;
-import org.eclipse.birt.report.engine.api.ReportEngine;
 
 /** Автотест полного цикла: спецификация → отчёт → PDF/HTML. */
 public final class ReportSelfTest {
@@ -98,46 +90,32 @@ public final class ReportSelfTest {
         // 3. Рендер PDF и HTML
         IReportEngine engine = null;
         try {
-            try {
-                Platform.startup(new PlatformConfig());
-            } catch (Throwable ignored) {
-                // платформа уже запущена (внутри Eclipse) — это нормально
-            }
-            EngineConfig config = new EngineConfig();
             String levelName = System.getProperty("aibirt.test.logLevel");
             Level level = levelName == null || levelName.isEmpty()
                 ? Level.WARNING : Level.parse(levelName);
-            config.setLogConfig(outDir.getAbsolutePath(), level);
 
-            // Шрифты PDF: конфигурация передаётся движку штатным API
-            // EngineConfig.setFontConfig; без неё в PDF нет кириллицы
-            // (движок берёт невстраиваемый Times-Roman).
-            if (PdfFonts.applyTo(config)) {
+            // Движок с конфигурацией шрифтов PDF (кириллица): без неё
+            // в PDF нет русского текста — движок берёт невстраиваемый
+            // Times-Roman (см. PdfFonts).
+            engine = ReportPreview.createEngine(outDir, level);
+            if (PdfFonts.customConfigUrl() != null) {
                 out.println("SELFTEST: FONTS OK (DejaVu Sans)");
             } else {
                 out.println("SELFTEST: WARN ресурс конфигурации шрифтов не найден");
             }
 
-            engine = new ReportEngine(config);
-
             File pdf = new File(outDir, spec.name() + ".pdf");
-            render(engine, rpt, pdf, spec, "pdf");
+            ReportPreview.render(engine, rpt, spec, null, "pdf", pdf);
             out.println("SELFTEST: RENDER PDF OK bytes=" + pdf.length());
 
             File html = new File(outDir, spec.name() + ".html");
-            render(engine, rpt, html, spec, "html");
+            ReportPreview.render(engine, rpt, spec, null, "html", html);
             out.println("SELFTEST: RENDER HTML OK bytes=" + html.length());
         } catch (Throwable t) {
             out.println("SELFTEST: ERROR рендер: " + describe(t));
             return 1;
         } finally {
-            if (engine != null) {
-                try {
-                    engine.destroy();
-                } catch (Throwable ignored) {
-                    // остановка движка не критична
-                }
-            }
+            ReportPreview.destroy(engine);
         }
 
         // 4. Проверка журнала движка на ошибки уровня SEVERE
@@ -153,35 +131,6 @@ public final class ReportSelfTest {
     }
 
     // ------------------------------------------------------------------
-
-    private static void render(IReportEngine engine, File rpt, File target,
-            ReportSpec spec, String format) throws Exception {
-        IReportRunnable design = engine.openReportDesign(rpt.getAbsolutePath());
-        IRunAndRenderTask task = engine.createRunAndRenderTask(design);
-        for (ReportSpec.Parameter p : spec.parameters()) {
-            if (p.def() != null) {
-                task.setParameterValue(p.name(), p.def());
-            }
-        }
-        if (!task.validateParameters()) {
-            throw new ReportBuilder.ReportBuildException(
-                "движок отклонил параметры отчёта (validateParameters=false)");
-        }
-        if ("html".equals(format)) {
-            HTMLRenderOption options = new HTMLRenderOption();
-            options.setOutputFileName(target.getAbsolutePath());
-            options.setOutputFormat("html");
-            options.setEmbeddable(false);
-            task.setRenderOption(options);
-        } else {
-            PDFRenderOption options = new PDFRenderOption();
-            options.setOutputFileName(target.getAbsolutePath());
-            options.setOutputFormat("pdf");
-            task.setRenderOption(options);
-        }
-        task.run();
-        task.close();
-    }
 
     /** Пароль: из спецификации, иначе системное свойство/переменная окружения. */
     private static String passwordOverride(ReportSpec spec) {

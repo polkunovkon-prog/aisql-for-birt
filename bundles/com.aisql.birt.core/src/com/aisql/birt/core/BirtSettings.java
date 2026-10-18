@@ -44,6 +44,10 @@ public final class BirtSettings {
     public static final String KEY_MAX_TOKENS = "llm.maxTokens";
     public static final String KEY_SYSTEM_PROMPT = "chat.systemPrompt";
     public static final String KEY_AUDIT_ENABLED = "audit.enabled";
+    public static final String KEY_DB_DRIVER = "db.driver";
+    public static final String KEY_DB_URL = "db.url";
+    public static final String KEY_DB_USER = "db.user";
+    public static final String KEY_DB_PASSWORD = "db.password";
 
     public static final String DEFAULT_BASE_URL = "http://192.168.100.152:8888/v1";
     public static final String DEFAULT_MODEL = "ornith-ai/Ornith-1.5-35B-A3B-GGUF";
@@ -52,6 +56,9 @@ public final class BirtSettings {
     public static final int DEFAULT_TIMEOUT_SEC = 900;
     public static final int DEFAULT_MAX_TOKENS = 0;
     public static final boolean DEFAULT_AUDIT_ENABLED = true;
+    public static final String DEFAULT_DB_DRIVER = "org.postgresql.Driver";
+    public static final String DEFAULT_DB_URL = "jdbc:postgresql://127.0.0.1:5432/hogwarts";
+    public static final String DEFAULT_DB_USER = "";
 
     public static final String DEFAULT_SYSTEM_PROMPT =
         "Ты — ИИ-помощник по проектированию отчётов BIRT (Eclipse BIRT 4.7). "
@@ -61,7 +68,9 @@ public final class BirtSettings {
 
     private static final List<String> KEY_ORDER = Arrays.asList(
         KEY_BASE_URL, KEY_MODEL, KEY_TOKEN, KEY_TEMPERATURE,
-        KEY_TIMEOUT, KEY_MAX_TOKENS, KEY_AUDIT_ENABLED, KEY_SYSTEM_PROMPT);
+        KEY_TIMEOUT, KEY_MAX_TOKENS, KEY_AUDIT_ENABLED,
+        KEY_DB_DRIVER, KEY_DB_URL, KEY_DB_USER, KEY_DB_PASSWORD,
+        KEY_SYSTEM_PROMPT);
 
     private static final Object LOCK = new Object();
     private static Properties cache;
@@ -99,6 +108,10 @@ public final class BirtSettings {
         p.setProperty(KEY_TIMEOUT, String.valueOf(DEFAULT_TIMEOUT_SEC));
         p.setProperty(KEY_MAX_TOKENS, String.valueOf(DEFAULT_MAX_TOKENS));
         p.setProperty(KEY_AUDIT_ENABLED, String.valueOf(DEFAULT_AUDIT_ENABLED));
+        p.setProperty(KEY_DB_DRIVER, DEFAULT_DB_DRIVER);
+        p.setProperty(KEY_DB_URL, DEFAULT_DB_URL);
+        p.setProperty(KEY_DB_USER, DEFAULT_DB_USER);
+        p.setProperty(KEY_DB_PASSWORD, "");
         p.setProperty(KEY_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT);
         return p;
     }
@@ -186,6 +199,27 @@ public final class BirtSettings {
         return "true".equalsIgnoreCase(v.trim()) || "1".equals(v.trim()) || "да".equalsIgnoreCase(v.trim());
     }
 
+    // ------------------------------------------------------------------
+    // База данных (контекст схемы; пароль хранится, как и ключ модели,
+    // в файле настроек ~/.ai-birt/ai-birt.properties)
+    // ------------------------------------------------------------------
+
+    public static String dbDriver() {
+        return load().getProperty(KEY_DB_DRIVER, DEFAULT_DB_DRIVER).trim();
+    }
+
+    public static String dbUrl() {
+        return load().getProperty(KEY_DB_URL, DEFAULT_DB_URL).trim();
+    }
+
+    public static String dbUser() {
+        return load().getProperty(KEY_DB_USER, DEFAULT_DB_USER).trim();
+    }
+
+    public static String dbPassword() {
+        return load().getProperty(KEY_DB_PASSWORD, "").trim();
+    }
+
     private static double parseDouble(String v, double def) {
         if (v == null) {
             return def;
@@ -238,6 +272,9 @@ public final class BirtSettings {
         sb.append("# llm.maxTokens     — ограничение длины ответа, 0 — не передавать\n");
         sb.append("# chat.systemPrompt — системная инструкция чата\n");
         sb.append("# audit.enabled     — вести журнал аудита в ai-birt-audit.jsonl (true/false)\n");
+        sb.append("# db.driver         — драйвер JDBC для чтения схемы БД (метаданные)\n");
+        sb.append("# db.url/db.user    — подключение к базе для кнопки «Схема БД…»\n");
+        sb.append("# db.password       — пароль базы (в модель не передаётся, в журнал не пишется)\n");
         sb.append("\n");
 
         Set<String> ordered = new HashSet<String>(KEY_ORDER);

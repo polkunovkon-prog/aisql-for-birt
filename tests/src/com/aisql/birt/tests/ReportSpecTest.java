@@ -119,8 +119,11 @@ public final class ReportSpecTest {
             + "\"body\":[{\"type\":\"label\",\"text\":\"x\"}]}",
             "допустимы латинские буквы");
         expectProblems("{\"report\":{\"name\":\"r\",\"title\":\"t\"},"
-            + "\"body\":[{\"type\":\"label\",\"text\":\"x\",\"color\":\"red\"}]}",
+            + "\"body\":[{\"type\":\"label\",\"text\":\"x\",\"стиль\":\"red\"}]}",
             "неизвестное поле");
+        expectProblems("{\"report\":{\"name\":\"r\",\"title\":\"t\"},"
+            + "\"body\":[{\"type\":\"label\",\"text\":\"x\",\"color\":\"red\"}]}",
+            "ожидается цвет");
         expectProblems(tableSpec("delete from students", "[]", ""),
             "запрещённое слово");
         expectProblems(tableSpec("select last_name from people where person_id = ?", "[]", ""),
@@ -134,6 +137,67 @@ public final class ReportSpecTest {
             + "\"parameters\":[{\"name\":\"p\",\"type\":\"многострочный\"}],"
             + "\"body\":[{\"type\":\"label\",\"text\":\"x\"}]}",
             "допустимы");
+
+        // 8. Расширения: стили, вычисляемые колонки, группировка
+        String extended = "{"
+            + " \"report\": { \"name\": \"ext\", \"title\": \"Расширение\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name, grade_level, house_name from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"grade_level\", \"type\": \"integer\" },"
+            + "                 { \"name\": \"house_name\", \"type\": \"string\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"label\", \"text\": \"О\", \"italic\": true, \"color\": \"#334455\" },"
+            + "   { \"type\": \"table\", \"dataset\": \"dsA\", \"group_by\": \"house_name\","
+            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"bold\": true,"
+            + "         \"background\": \"#EEF2F7\", \"header_background\": \"#DDDDE0\","
+            + "         \"color\": \"#112233\" },"
+            + "       { \"header\": \"Балл\", \"expr\": \"row[\\\"grade_level\\\"] * 10\","
+            + "         \"italic\": true, \"align\": \"right\" } ] } ]"
+            + "}";
+        ReportSpec ext = ReportSpec.parse(extended);
+        ReportSpec.Label extLabel = (ReportSpec.Label) ext.body().get(0);
+        T.check(extLabel.italic() && "#334455".equals(extLabel.color()),
+            "надпись: курсив и цвет");
+        ReportSpec.Table extTable = (ReportSpec.Table) ext.body().get(1);
+        T.eq("house_name", extTable.groupBy(), "группировка: колонка");
+        T.eq("Факультет", extTable.groupTitle(), "группировка: подпись");
+        T.check(extTable.groupCount(), "группировка: счётчик включён");
+        ReportSpec.TableColumn plain = extTable.columns().get(0);
+        T.check(plain.bold() && "#EEF2F7".equals(plain.background())
+            && "#DDDDE0".equals(plain.headerBackground()) && "#112233".equals(plain.color()),
+            "колонка: стили ячеек");
+        ReportSpec.TableColumn comp = extTable.columns().get(1);
+        T.eq(null, comp.resultColumn(), "вычисляемая колонка: без прямой колонки");
+        T.eq(1, comp.refs().size(), "вычисляемая колонка: одна ссылка");
+        T.eq("grade_level", comp.refs().get(0), "вычисляемая колонка: ссылка grade_level");
+        T.check(comp.italic(), "вычисляемая колонка: курсив");
+        String extSummary = ext.summary();
+        T.check(extSummary.contains("группировка"), "сводка: группировка упомянута");
+
+        ReportSpec extAgain = ReportSpec.parse(ext.toJson());
+        ReportSpec.Table extTable2 = (ReportSpec.Table) extAgain.body().get(1);
+        T.eq("house_name", extTable2.groupBy(), "оборот: группировка");
+        T.check(extTable2.groupCount(), "оборот: счётчик группы");
+        T.check(extTable2.columns().get(1).refs().contains("grade_level"),
+            "оборот: ссылки вычисляемой колонки");
+
+        // Ошибки расширений
+        expectProblems(extended.replace("\"#EEF2F7\"", "\"светло-серый\""),
+            "ожидается цвет");
+        expectProblems(extended.replace("row[\\\"grade_level\\\"] * 10",
+            "row[\\\"grade_level\\\"] ; drop"),
+            "недопустимые символы");
+        expectProblems(extended.replace("\"group_by\": \"house_name\"",
+            "\"group_by\": \"не_такая_колонка\""),
+            "не описана");
+        expectProblems(extended.replace("row[\\\"grade_level\\\"] * 10",
+            "row[\\\"нет_колонки\\\"] * 10"),
+            "не описана");
     }
 
     /** Спецификация с таблицей: SQL, params и доп. поля колонок задаются извне. */

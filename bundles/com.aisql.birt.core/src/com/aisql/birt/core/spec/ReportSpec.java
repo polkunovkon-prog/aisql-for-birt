@@ -6,6 +6,12 @@
  * понятная ошибка вместо «сломанного файла». Из проверенной спецификации
  * собирается .rptdesign через Design API BIRT (см. com.aisql.birt.core.report).
  *
+ * Расширения v0 (обратно совместимые, все ключи необязательные):
+ *   label: italic, color;
+ *   table: group_by, group_title, group_count (группировка строк);
+ *   колонка таблицы: bold, italic, color, background, header_background,
+ *   expr-вычисление из колонок набора (row["..."]).
+ *
  * Лицензия: Apache-2.0
  */
 package com.aisql.birt.core.spec;
@@ -45,6 +51,14 @@ public final class ReportSpec {
     private static final Pattern NAME_RE = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,59}");
     private static final Pattern COLUMN_EXPR_RE = Pattern.compile(
         "^\\s*(?:row|dataSetRow)\\s*\\[\\s*[\"']([^\"']+)[\"']\\s*]\\s*$");
+    /** Ссылки на колонки набора данных внутри выражения: row["..."]. */
+    private static final Pattern EXPR_REF_RE = Pattern.compile(
+        "(?:row|dataSetRow)\\s*\\[\\s*[\"']([^\"']+)[\"']\\s*]");
+    /** Простое выражение BIRT: буквы, цифры, пробелы, арифметика, row["..."]; без «;». */
+    private static final Pattern SIMPLE_EXPR_RE = Pattern.compile(
+        "[A-Za-z0-9_ \"'\\[\\]()., +\\-*/%<>=!&|?:#]+");
+    /** Цвет в формате #RRGGBB. */
+    private static final Pattern COLOR_RE = Pattern.compile("#[0-9A-Fa-f]{6}");
 
     /** Ошибка разбора/проверки спецификации (список пояснений на русском). */
     public static class SpecException extends Exception {
@@ -181,18 +195,25 @@ public final class ReportSpec {
         private final String text;
         private final Double sizePt;
         private final boolean bold;
+        private final boolean italic;
+        private final String color;
         private final String align;
 
-        Label(String text, Double sizePt, boolean bold, String align) {
+        Label(String text, Double sizePt, boolean bold, boolean italic,
+                String color, String align) {
             this.text = text;
             this.sizePt = sizePt;
             this.bold = bold;
+            this.italic = italic;
+            this.color = color;
             this.align = align;
         }
 
         public String text() { return text; }
         public Double sizePt() { return sizePt; }
         public boolean bold() { return bold; }
+        public boolean italic() { return italic; }
+        public String color() { return color; }
         public String align() { return align; }
 
         @Override public String type() { return "label"; }
@@ -205,17 +226,31 @@ public final class ReportSpec {
         private final Double widthMm;
         private final String align;
         private final String type;
+        private final boolean bold;
+        private final boolean italic;
+        private final String color;
+        private final String background;
+        private final String headerBackground;
         /** Имя колонки набора данных, если выражение вида row["..."]; иначе null. */
         private final String resultColumn;
+        /** Все ссылки row["..."] в выражении (для вычисляемых колонок). */
+        private final List<String> refs;
 
-        TableColumn(String header, String expr, Double widthMm, String align,
-                String type, String resultColumn) {
+        TableColumn(String header, String expr, Double widthMm, String align, String type,
+                boolean bold, boolean italic, String color, String background,
+                String headerBackground, String resultColumn, List<String> refs) {
             this.header = header;
             this.expr = expr;
             this.widthMm = widthMm;
             this.align = align;
             this.type = type;
+            this.bold = bold;
+            this.italic = italic;
+            this.color = color;
+            this.background = background;
+            this.headerBackground = headerBackground;
             this.resultColumn = resultColumn;
+            this.refs = Collections.unmodifiableList(refs);
         }
 
         public String header() { return header; }
@@ -223,21 +258,40 @@ public final class ReportSpec {
         public Double widthMm() { return widthMm; }
         public String align() { return align; }
         public String type() { return type; }
+        public boolean bold() { return bold; }
+        public boolean italic() { return italic; }
+        public String color() { return color; }
+        public String background() { return background; }
+        public String headerBackground() { return headerBackground; }
         public String resultColumn() { return resultColumn; }
+        public List<String> refs() { return refs; }
     }
 
     /** Таблица с данными. */
     public static final class Table extends BodyElement {
         private final String dataset;
         private final List<TableColumn> columns;
+        /** Колонка набора данных для группировки строк; null — без группировки. */
+        private final String groupBy;
+        /** Подпись заголовка группы (по умолчанию «Группа»). */
+        private final String groupTitle;
+        /** Показывать в подвале группы количество строк. */
+        private final boolean groupCount;
 
-        Table(String dataset, List<TableColumn> columns) {
+        Table(String dataset, List<TableColumn> columns,
+                String groupBy, String groupTitle, boolean groupCount) {
             this.dataset = dataset;
             this.columns = Collections.unmodifiableList(columns);
+            this.groupBy = groupBy;
+            this.groupTitle = groupTitle;
+            this.groupCount = groupCount;
         }
 
         public String dataset() { return dataset; }
         public List<TableColumn> columns() { return columns; }
+        public String groupBy() { return groupBy; }
+        public String groupTitle() { return groupTitle; }
+        public boolean groupCount() { return groupCount; }
 
         @Override public String type() { return "table"; }
     }
@@ -678,7 +732,8 @@ public final class ReportSpec {
     }
 
     private static BodyElement parseLabel(Map<String, Object> e, int i, List<String> problems) {
-        checkUnknown(e, problems, "body[" + i + "]", "type", "text", "size_pt", "bold", "align");
+        checkUnknown(e, problems, "body[" + i + "]",
+            "type", "text", "size_pt", "bold", "italic", "color", "align");
         String text = strField(e, "text", true, problems, "body[" + i + "]");
         if (text != null && text.length() > 500) {
             problems.add("body[" + i + "].text длиннее 500 символов");
@@ -698,6 +753,8 @@ public final class ReportSpec {
             }
         }
         boolean bold = Json.asBool(e.get("bold"), false);
+        boolean italic = Json.asBool(e.get("italic"), false);
+        String color = colorField(e, "color", problems, "body[" + i + "]");
         String align = strField(e, "align", false, problems, "body[" + i + "]");
         if (align != null && !ALIGNS.contains(align)) {
             problems.add("body[" + i + "].align «" + align + "»: допустимы " + ALIGNS);
@@ -706,16 +763,35 @@ public final class ReportSpec {
         if (text == null) {
             return null;
         }
-        return new Label(text, size, bold, align);
+        return new Label(text, size, bold, italic, color, align);
     }
 
     private static BodyElement parseTable(Map<String, Object> e, int i,
             List<String> problems, List<DataSet> datasets) {
-        checkUnknown(e, problems, "body[" + i + "]", "type", "dataset", "columns");
+        checkUnknown(e, problems, "body[" + i + "]",
+            "type", "dataset", "columns", "group_by", "group_title", "group_count");
         String dataset = strField(e, "dataset", true, problems, "body[" + i + "]");
         DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
         if (dataset != null && ds == null) {
             problems.add("body[" + i + "].dataset «" + dataset + "»: набор данных не описан");
+        }
+        String groupBy = strField(e, "group_by", false, problems, "body[" + i + "]");
+        String groupTitle = strField(e, "group_title", false, problems, "body[" + i + "]");
+        boolean groupCount = Json.asBool(e.get("group_count"), false);
+        if (groupBy != null && !matchesName(groupBy)) {
+            problems.add("body[" + i + "].group_by «" + groupBy + "»: недопустимое имя");
+            groupBy = null;
+        }
+        if (groupBy != null && ds != null && !ds.columns().isEmpty()
+                && findDatasetColumn(ds, groupBy) == null) {
+            problems.add("body[" + i + "].group_by: колонка «" + groupBy
+                + "» не описана в datasets." + dataset + ".columns");
+        }
+        if (groupTitle != null && groupTitle.length() > 200) {
+            problems.add("body[" + i + "].group_title длиннее 200 символов");
+        }
+        if (groupTitle == null) {
+            groupTitle = "Группа";
         }
         List<Object> colsRaw = arrField(e, "columns", problems, "body[" + i + "]");
         List<TableColumn> cols = new ArrayList<TableColumn>();
@@ -734,7 +810,9 @@ public final class ReportSpec {
                     problems.add(where + " должен быть объектом");
                     continue;
                 }
-                checkUnknown(c, problems, where, "header", "expr", "width_mm", "align", "type");
+                checkUnknown(c, problems, where,
+                    "header", "expr", "width_mm", "align", "type",
+                    "bold", "italic", "color", "background", "header_background");
                 String header = strField(c, "header", true, problems, where);
                 String expr = strField(c, "expr", true, problems, where);
                 Double width = null;
@@ -761,25 +839,46 @@ public final class ReportSpec {
                     problems.add(where + ".type «" + type + "»: допустимы " + TYPES);
                     type = null;
                 }
+                boolean bold = Json.asBool(c.get("bold"), false);
+                boolean italic = Json.asBool(c.get("italic"), false);
+                String color = colorField(c, "color", problems, where);
+                String background = colorField(c, "background", problems, where);
+                String headerBackground = colorField(c, "header_background", problems, where);
                 if (header == null || expr == null) {
                     continue;
                 }
                 String resultCol = null;
+                List<String> refs = new ArrayList<String>();
                 Matcher m = COLUMN_EXPR_RE.matcher(expr);
                 if (m.matches()) {
                     resultCol = m.group(1);
-                    if (ds != null && !ds.columns().isEmpty() && findDatasetColumn(ds, resultCol) == null) {
-                        problems.add(where + ".expr: колонка «" + resultCol
+                    refs.add(resultCol);
+                } else if (!SIMPLE_EXPR_RE.matcher(expr).matches()) {
+                    problems.add(where + ".expr: недопустимые символы — нужно простое "
+                        + "выражение BIRT (арифметика и row[\"колонка\"], без «;»)");
+                } else {
+                    Matcher rm = EXPR_REF_RE.matcher(expr);
+                    while (rm.find()) {
+                        if (!refs.contains(rm.group(1))) {
+                            refs.add(rm.group(1));
+                        }
+                    }
+                }
+                for (String ref : refs) {
+                    if (ds != null && !ds.columns().isEmpty()
+                            && findDatasetColumn(ds, ref) == null) {
+                        problems.add(where + ".expr: колонка «" + ref
                             + "» не описана в datasets." + dataset + ".columns");
                     }
                 }
-                cols.add(new TableColumn(header, expr, width, align, type, resultCol));
+                cols.add(new TableColumn(header, expr, width, align, type,
+                    bold, italic, color, background, headerBackground, resultCol, refs));
             }
         }
         if (dataset == null || cols.isEmpty()) {
             return null;
         }
-        return new Table(dataset, cols);
+        return new Table(dataset, cols, groupBy, groupTitle, groupCount);
     }
 
     // ------------------------------------------------------------------
@@ -850,6 +949,25 @@ public final class ReportSpec {
             return null;
         }
         return s;
+    }
+
+    /** Необязательный цвет вида #RRGGBB. */
+    private static String colorField(Map<String, Object> map, String key,
+            List<String> problems, String where) {
+        Object o = map.get(key);
+        if (o == null) {
+            return null;
+        }
+        String s = Json.asStr(o);
+        if (s == null) {
+            problems.add(where + "." + key + " должен быть строкой");
+            return null;
+        }
+        if (!COLOR_RE.matcher(s.trim()).matches()) {
+            problems.add(where + "." + key + " «" + s + "»: ожидается цвет вида «#RRGGBB»");
+            return null;
+        }
+        return s.trim();
     }
 
     static boolean matchesName(String name) {
@@ -1027,6 +1145,12 @@ public final class ReportSpec {
                 if (l.bold()) {
                     lm.put("bold", Boolean.TRUE);
                 }
+                if (l.italic()) {
+                    lm.put("italic", Boolean.TRUE);
+                }
+                if (l.color() != null) {
+                    lm.put("color", l.color());
+                }
                 if (l.align() != null) {
                     lm.put("align", l.align());
                 }
@@ -1036,6 +1160,15 @@ public final class ReportSpec {
                 Map<String, Object> tm = Json.obj();
                 tm.put("type", "table");
                 tm.put("dataset", t.dataset());
+                if (t.groupBy() != null) {
+                    tm.put("group_by", t.groupBy());
+                    if (!"Группа".equals(t.groupTitle())) {
+                        tm.put("group_title", t.groupTitle());
+                    }
+                    if (t.groupCount()) {
+                        tm.put("group_count", Boolean.TRUE);
+                    }
+                }
                 List<Object> cs = Json.arr();
                 for (TableColumn c : t.columns()) {
                     Map<String, Object> cm = Json.obj();
@@ -1049,6 +1182,21 @@ public final class ReportSpec {
                     }
                     if (c.type() != null) {
                         cm.put("type", c.type());
+                    }
+                    if (c.bold()) {
+                        cm.put("bold", Boolean.TRUE);
+                    }
+                    if (c.italic()) {
+                        cm.put("italic", Boolean.TRUE);
+                    }
+                    if (c.color() != null) {
+                        cm.put("color", c.color());
+                    }
+                    if (c.background() != null) {
+                        cm.put("background", c.background());
+                    }
+                    if (c.headerBackground() != null) {
+                        cm.put("header_background", c.headerBackground());
                     }
                     cs.add(cm);
                 }
@@ -1127,6 +1275,10 @@ public final class ReportSpec {
                         sb.append(", ");
                     }
                     sb.append(t.columns().get(j).header());
+                }
+                if (t.groupBy() != null) {
+                    sb.append("; группировка «").append(t.groupTitle())
+                        .append("» по ").append(t.groupBy());
                 }
             }
         }
