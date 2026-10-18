@@ -74,8 +74,8 @@ releng/                       — build.sh, test.sh, install.sh, uninstall.sh,
                                 birt-classpath.sh, m2-selftest.sh
 tests/src/                    — офлайн-тесты без JUnit (заглушечный HTTP-сервер)
 tests/samples/                — примеры спецификаций (students-by-house)
-docs/                         — INSTALL, USAGE, TESTING, ROADMAP, ADR-0001,
-                                TZ-PROMPT-hogwarts (готовый промт приёмки)
+docs/                         — INSTALL, USAGE, TESTING, SECURITY, ROADMAP,
+                                ADR-0001, TZ-PROMPT-hogwarts (промт приёмки)
 ```
 
 Как это устроено и что дальше — `docs/ROADMAP.md`; полный план работ —
@@ -117,6 +117,10 @@ docs/                         — INSTALL, USAGE, TESTING, ROADMAP, ADR-0001,
 - **Модель — смысл, клиент — формат**: отчёты собираются штатным Design API
   BIRT по компактной спецификации (ADR-0001), а не генерацией XML моделью —
   это снижает риск «сломанного файла» и даёт понятные ошибки проверки.
+- **Данные не уходят в модель**: ИИ видит только текст ТЗ и вопросов из
+  панели (в M3 — ещё и метаданные схемы БД); строки из базы читает локально
+  движок BIRT при рендере; пароль БД в модель не передаётся, SQL — только на
+  чтение (`docs/SECURITY.md`).
 - **Проверяемость**: офлайн-тесты, контрольный headless-запуск со стартовым
   маркером в журнале, журнал аудита.
 
