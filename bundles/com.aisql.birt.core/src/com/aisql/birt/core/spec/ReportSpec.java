@@ -8,8 +8,10 @@
  *
  * Расширения v0 (обратно совместимые, все ключи необязательные):
  *   label: italic, color;
- *   table: group_by, group_title, group_count (группировка строк);
+ *   table: group_by, group_title, group_count (группировка строк),
+ *   total_label (подпись строки итогов);
  *   колонка таблицы: bold, italic, color, background, header_background,
+ *   total (sum/count/avg/min/max — итог в подвале таблицы),
  *   expr-вычисление из колонок набора (row["..."]).
  *
  * Лицензия: Apache-2.0
@@ -23,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,6 +50,9 @@ public final class ReportSpec {
     /** Выравнивание текста. */
     public static final List<String> ALIGNS = Collections.unmodifiableList(
         Arrays.asList("left", "center", "right"));
+    /** Функции итога (подвал таблицы). */
+    public static final List<String> TOTALS = Collections.unmodifiableList(
+        Arrays.asList("sum", "count", "avg", "min", "max"));
 
     private static final Pattern NAME_RE = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,59}");
     private static final Pattern COLUMN_EXPR_RE = Pattern.compile(
@@ -235,10 +241,13 @@ public final class ReportSpec {
         private final String resultColumn;
         /** Все ссылки row["..."] в выражении (для вычисляемых колонок). */
         private final List<String> refs;
+        /** Функция итога в подвале таблицы (sum/count/avg/min/max); null — нет. */
+        private final String total;
 
         TableColumn(String header, String expr, Double widthMm, String align, String type,
                 boolean bold, boolean italic, String color, String background,
-                String headerBackground, String resultColumn, List<String> refs) {
+                String headerBackground, String resultColumn, List<String> refs,
+                String total) {
             this.header = header;
             this.expr = expr;
             this.widthMm = widthMm;
@@ -251,6 +260,7 @@ public final class ReportSpec {
             this.headerBackground = headerBackground;
             this.resultColumn = resultColumn;
             this.refs = Collections.unmodifiableList(refs);
+            this.total = total;
         }
 
         public String header() { return header; }
@@ -265,6 +275,7 @@ public final class ReportSpec {
         public String headerBackground() { return headerBackground; }
         public String resultColumn() { return resultColumn; }
         public List<String> refs() { return refs; }
+        public String total() { return total; }
     }
 
     /** Таблица с данными. */
@@ -277,14 +288,17 @@ public final class ReportSpec {
         private final String groupTitle;
         /** Показывать в подвале группы количество строк. */
         private final boolean groupCount;
+        /** Подпись строки итогов (по умолчанию «Итого»); null — без подписи. */
+        private final String totalLabel;
 
         Table(String dataset, List<TableColumn> columns,
-                String groupBy, String groupTitle, boolean groupCount) {
+                String groupBy, String groupTitle, boolean groupCount, String totalLabel) {
             this.dataset = dataset;
             this.columns = Collections.unmodifiableList(columns);
             this.groupBy = groupBy;
             this.groupTitle = groupTitle;
             this.groupCount = groupCount;
+            this.totalLabel = totalLabel;
         }
 
         public String dataset() { return dataset; }
@@ -292,6 +306,7 @@ public final class ReportSpec {
         public String groupBy() { return groupBy; }
         public String groupTitle() { return groupTitle; }
         public boolean groupCount() { return groupCount; }
+        public String totalLabel() { return totalLabel; }
 
         @Override public String type() { return "table"; }
     }
@@ -769,11 +784,17 @@ public final class ReportSpec {
     private static BodyElement parseTable(Map<String, Object> e, int i,
             List<String> problems, List<DataSet> datasets) {
         checkUnknown(e, problems, "body[" + i + "]",
-            "type", "dataset", "columns", "group_by", "group_title", "group_count");
+            "type", "dataset", "columns", "group_by", "group_title", "group_count",
+            "total_label");
         String dataset = strField(e, "dataset", true, problems, "body[" + i + "]");
         DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
         if (dataset != null && ds == null) {
             problems.add("body[" + i + "].dataset «" + dataset + "»: набор данных не описан");
+        }
+        String totalLabel = strField(e, "total_label", false, problems, "body[" + i + "]");
+        if (totalLabel != null && totalLabel.length() > 200) {
+            problems.add("body[" + i + "].total_label длиннее 200 символов");
+            totalLabel = null;
         }
         String groupBy = strField(e, "group_by", false, problems, "body[" + i + "]");
         String groupTitle = strField(e, "group_title", false, problems, "body[" + i + "]");
@@ -812,7 +833,8 @@ public final class ReportSpec {
                 }
                 checkUnknown(c, problems, where,
                     "header", "expr", "width_mm", "align", "type",
-                    "bold", "italic", "color", "background", "header_background");
+                    "bold", "italic", "color", "background", "header_background",
+                    "total");
                 String header = strField(c, "header", true, problems, where);
                 String expr = strField(c, "expr", true, problems, where);
                 Double width = null;
@@ -844,6 +866,14 @@ public final class ReportSpec {
                 String color = colorField(c, "color", problems, where);
                 String background = colorField(c, "background", problems, where);
                 String headerBackground = colorField(c, "header_background", problems, where);
+                String total = strField(c, "total", false, problems, where);
+                if (total != null) {
+                    total = total.toLowerCase(Locale.ROOT);
+                    if (!TOTALS.contains(total)) {
+                        problems.add(where + ".total «" + total + "»: допустимы " + TOTALS);
+                        total = null;
+                    }
+                }
                 if (header == null || expr == null) {
                     continue;
                 }
@@ -872,13 +902,24 @@ public final class ReportSpec {
                     }
                 }
                 cols.add(new TableColumn(header, expr, width, align, type,
-                    bold, italic, color, background, headerBackground, resultCol, refs));
+                    bold, italic, color, background, headerBackground, resultCol, refs,
+                    total));
             }
         }
         if (dataset == null || cols.isEmpty()) {
             return null;
         }
-        return new Table(dataset, cols, groupBy, groupTitle, groupCount);
+        boolean hasTotal = false;
+        for (TableColumn col : cols) {
+            if (col.total() != null) {
+                hasTotal = true;
+                break;
+            }
+        }
+        if (!hasTotal) {
+            totalLabel = null;
+        }
+        return new Table(dataset, cols, groupBy, groupTitle, groupCount, totalLabel);
     }
 
     // ------------------------------------------------------------------
@@ -1169,6 +1210,9 @@ public final class ReportSpec {
                         tm.put("group_count", Boolean.TRUE);
                     }
                 }
+                if (t.totalLabel() != null && !"Итого".equals(t.totalLabel())) {
+                    tm.put("total_label", t.totalLabel());
+                }
                 List<Object> cs = Json.arr();
                 for (TableColumn c : t.columns()) {
                     Map<String, Object> cm = Json.obj();
@@ -1197,6 +1241,9 @@ public final class ReportSpec {
                     }
                     if (c.headerBackground() != null) {
                         cm.put("header_background", c.headerBackground());
+                    }
+                    if (c.total() != null) {
+                        cm.put("total", c.total());
                     }
                     cs.add(cm);
                 }
@@ -1279,6 +1326,15 @@ public final class ReportSpec {
                 if (t.groupBy() != null) {
                     sb.append("; группировка «").append(t.groupTitle())
                         .append("» по ").append(t.groupBy());
+                }
+                int totals = 0;
+                for (int j = 0; j < t.columns().size(); j++) {
+                    if (t.columns().get(j).total() != null) {
+                        totals++;
+                    }
+                }
+                if (totals > 0) {
+                    sb.append("; итоги: ").append(totals);
                 }
             }
         }

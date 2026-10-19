@@ -17,9 +17,11 @@ import com.aisql.birt.core.spec.ReportSpec;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Iterator;
 
 import com.ibm.icu.util.ULocale;
 
+import org.eclipse.birt.report.model.api.AggregationArgumentHandle;
 import org.eclipse.birt.report.model.api.CellHandle;
 import org.eclipse.birt.report.model.api.ComputedColumnHandle;
 import org.eclipse.birt.report.model.api.DataItemHandle;
@@ -87,11 +89,11 @@ public final class ReportBuilderTest {
             + " \"body\": ["
             + "   { \"type\": \"label\", \"text\": \"О\", \"italic\": true, \"color\": \"#334455\" },"
             + "   { \"type\": \"table\", \"dataset\": \"dsStudents\", \"group_by\": \"house_name\","
-            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"columns\": ["
+            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"total_label\": \"Итого\", \"columns\": ["
             + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"bold\": true,"
             + "         \"background\": \"#EEF2F7\", \"header_background\": \"#DDDDE0\" },"
             + "       { \"header\": \"Балл\", \"expr\": \"row[\\\"grade_level\\\"] * 10\","
-            + "         \"italic\": true, \"align\": \"right\" } ] } ]"
+            + "         \"italic\": true, \"align\": \"right\", \"total\": \"sum\" } ] } ]"
             + "}";
     }
 
@@ -176,6 +178,7 @@ public final class ReportBuilderTest {
         T.check(extXml.contains("italic"), "стиль: курсив записан в файл");
         T.check(extXml.contains("#EEF2F7"), "стиль: фон ячеек записан в файл");
         T.check(extXml.contains("Total.count()"), "группировка: счётчик строк записан в файл");
+        T.check(extXml.contains("aggregateFunction"), "итоги: агрегат записан в файл");
 
         SessionHandle extSession = new DesignEngine(new DesignConfig())
             .newSessionHandle(ULocale.ENGLISH);
@@ -220,11 +223,36 @@ public final class ReportBuilderTest {
 
             CellHandle computedCell = (CellHandle) extDetail.getCells().get(1);
             DataItemHandle computed = (DataItemHandle) computedCell.getContent().get(0);
-            String valueExpr = computed.getValueExpr();
-            String resultColumn = computed.getResultSetColumn();
-            T.check((valueExpr != null && valueExpr.contains("grade_level"))
-                || (resultColumn != null && resultColumn.contains("grade_level")),
-                "вычисляемая колонка: выражение сохранено");
+            String computedBinding = computed.getResultSetColumn();
+            ComputedColumnHandle computedColumn =
+                computedBinding == null ? null : extTable.findColumnBinding(computedBinding);
+            T.check(computedColumn != null
+                && computedColumn.getExpression() != null
+                && computedColumn.getExpression().contains("grade_level"),
+                "вычисляемая колонка: привязка к вычисляемой колонке таблицы");
+
+            // Итоги: строка в подвале таблицы (подпись + агрегат по колонке).
+            T.eq(1, extTable.getFooter().getCount(), "итоги: подвал таблицы");
+            RowHandle totalsRow = (RowHandle) extTable.getFooter().get(0);
+            CellHandle totalsLabelCell = (CellHandle) totalsRow.getCells().get(0);
+            LabelHandle totalsLabel = (LabelHandle) totalsLabelCell.getContent().get(0);
+            T.eq("Итого", totalsLabel.getText(), "итоги: подпись в свободной колонке");
+            CellHandle totalsCell = (CellHandle) totalsRow.getCells().get(1);
+            DataItemHandle totalsItem = (DataItemHandle) totalsCell.getContent().get(0);
+            ComputedColumnHandle totalsBinding =
+                extTable.findColumnBinding(totalsItem.getResultSetColumn());
+            T.check(totalsBinding != null
+                && "sum".equals(totalsBinding.getAggregateFunction()),
+                "итоги: агрегат sum по колонке");
+            String totalsArg = null;
+            Iterator<?> args = totalsBinding == null ? null : totalsBinding.argumentsIterator();
+            if (args != null && args.hasNext()) {
+                AggregationArgumentHandle arg = (AggregationArgumentHandle) args.next();
+                totalsArg = arg.getValue();
+            }
+            T.check(totalsArg != null && computedBinding != null
+                && totalsArg.contains(computedBinding),
+                "итоги: аргумент агрегата — ссылка на привязку колонки");
         } finally {
             extSession.closeAll(false);
         }

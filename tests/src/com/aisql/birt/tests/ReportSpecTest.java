@@ -152,12 +152,12 @@ public final class ReportSpecTest {
             + " \"body\": ["
             + "   { \"type\": \"label\", \"text\": \"О\", \"italic\": true, \"color\": \"#334455\" },"
             + "   { \"type\": \"table\", \"dataset\": \"dsA\", \"group_by\": \"house_name\","
-            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"columns\": ["
+            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"total_label\": \"Итого по области\", \"columns\": ["
             + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"bold\": true,"
             + "         \"background\": \"#EEF2F7\", \"header_background\": \"#DDDDE0\","
             + "         \"color\": \"#112233\" },"
             + "       { \"header\": \"Балл\", \"expr\": \"row[\\\"grade_level\\\"] * 10\","
-            + "         \"italic\": true, \"align\": \"right\" } ] } ]"
+            + "         \"italic\": true, \"align\": \"right\", \"total\": \"sum\" } ] } ]"
             + "}";
         ReportSpec ext = ReportSpec.parse(extended);
         ReportSpec.Label extLabel = (ReportSpec.Label) ext.body().get(0);
@@ -167,6 +167,7 @@ public final class ReportSpecTest {
         T.eq("house_name", extTable.groupBy(), "группировка: колонка");
         T.eq("Факультет", extTable.groupTitle(), "группировка: подпись");
         T.check(extTable.groupCount(), "группировка: счётчик включён");
+        T.eq("Итого по области", extTable.totalLabel(), "итоги: подпись строки");
         ReportSpec.TableColumn plain = extTable.columns().get(0);
         T.check(plain.bold() && "#EEF2F7".equals(plain.background())
             && "#DDDDE0".equals(plain.headerBackground()) && "#112233".equals(plain.color()),
@@ -176,8 +177,10 @@ public final class ReportSpecTest {
         T.eq(1, comp.refs().size(), "вычисляемая колонка: одна ссылка");
         T.eq("grade_level", comp.refs().get(0), "вычисляемая колонка: ссылка grade_level");
         T.check(comp.italic(), "вычисляемая колонка: курсив");
+        T.eq("sum", comp.total(), "итоги: функция sum у колонки");
         String extSummary = ext.summary();
         T.check(extSummary.contains("группировка"), "сводка: группировка упомянута");
+        T.check(extSummary.contains("итоги"), "сводка: итоги упомянуты");
 
         ReportSpec extAgain = ReportSpec.parse(ext.toJson());
         ReportSpec.Table extTable2 = (ReportSpec.Table) extAgain.body().get(1);
@@ -185,6 +188,8 @@ public final class ReportSpecTest {
         T.check(extTable2.groupCount(), "оборот: счётчик группы");
         T.check(extTable2.columns().get(1).refs().contains("grade_level"),
             "оборот: ссылки вычисляемой колонки");
+        T.eq("sum", extTable2.columns().get(1).total(), "оборот: функция итога");
+        T.eq("Итого по области", extTable2.totalLabel(), "оборот: подпись итога");
 
         // Ошибки расширений
         expectProblems(extended.replace("\"#EEF2F7\"", "\"светло-серый\""),
@@ -198,6 +203,8 @@ public final class ReportSpecTest {
         expectProblems(extended.replace("row[\\\"grade_level\\\"] * 10",
             "row[\\\"нет_колонки\\\"] * 10"),
             "не описана");
+        expectProblems(extended.replace("\"total\": \"sum\"", "\"total\": \"среднее\""),
+            "допустимы");
     }
 
     /** Спецификация с таблицей: SQL, params и доп. поля колонок задаются извне. */

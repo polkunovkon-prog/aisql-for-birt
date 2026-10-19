@@ -49,11 +49,12 @@
       "group_by": "house_name",
       "group_title": "Факультет",
       "group_count": true,
+      "total_label": "Итого по всем факультетам",
       "columns": [
         { "header": "Фамилия", "expr": "row[\"last_name\"]", "width_mm": 45, "header_background": "#DDDDE0" },
         { "header": "Имя", "expr": "row[\"first_name\"]", "width_mm": 35, "header_background": "#DDDDE0" },
         { "header": "Курс", "expr": "row[\"grade_level\"]", "width_mm": 18, "align": "center", "header_background": "#DDDDE0" },
-        { "header": "Балл (курс × 10)", "expr": "row[\"grade_level\"] * 10", "width_mm": 28, "align": "right", "italic": true, "background": "#EEF2F7" }
+        { "header": "Балл (курс × 10)", "expr": "row[\"grade_level\"] * 10", "width_mm": 28, "align": "right", "italic": true, "background": "#EEF2F7", "total": "sum" }
       ]
     }
   ]

@@ -31,6 +31,8 @@ import org.eclipse.birt.report.model.api.DesignConfig;
 import org.eclipse.birt.report.model.api.DesignElementHandle;
 import org.eclipse.birt.report.model.api.DesignEngine;
 import org.eclipse.birt.report.model.api.ElementFactory;
+import org.eclipse.birt.report.model.api.Expression;
+import org.eclipse.birt.report.model.api.ExpressionType;
 import org.eclipse.birt.report.model.api.LabelHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
 import org.eclipse.birt.report.model.api.OdaDataSourceHandle;
@@ -45,6 +47,7 @@ import org.eclipse.birt.report.model.api.StructureFactory;
 import org.eclipse.birt.report.model.api.TableGroupHandle;
 import org.eclipse.birt.report.model.api.TableHandle;
 import org.eclipse.birt.report.model.api.elements.DesignChoiceConstants;
+import org.eclipse.birt.report.model.api.elements.structures.AggregationArgument;
 import org.eclipse.birt.report.model.api.elements.structures.CachedMetaData;
 import org.eclipse.birt.report.model.api.elements.structures.ColumnHint;
 import org.eclipse.birt.report.model.api.elements.structures.ComputedColumn;
@@ -432,6 +435,38 @@ public final class ReportBuilder {
             }
         }
 
+        // Вычисляемые колонки: выражение храним в отдельной вычисляемой
+        // колонке таблицы, а элемент данных привязываем к её имени — так
+        // делает дизайнер BIRT. Запись выражения прямо в resultSetColumn
+        // опасна: при сохранении модель «разрешает» такие элементы по
+        // совпадению выражений с другими колонками и может перенаправить
+        // ячейку (проверено: агрегат с тем же выражением перехватывал
+        // привязку колонки данных).
+        java.util.Map<Integer, String> computedBindings = new HashMap<Integer, String>();
+        if (bound != null) {
+            for (int i = 0; i < cols.size(); i++) {
+                ReportSpec.TableColumn col = cols.get(i);
+                if (col.resultColumn() != null) {
+                    continue;
+                }
+                String binding = name + "_c" + (i + 1);
+                int suffix = 1;
+                while (table.findColumnBinding(binding) != null) {
+                    suffix++;
+                    binding = name + "_c" + (i + 1) + "_" + suffix;
+                }
+                ComputedColumn cc = new ComputedColumn();
+                cc.setName(binding);
+                cc.setDisplayName(binding);
+                cc.setExpression(col.expr());
+                if (col.type() != null) {
+                    cc.setDataType(col.type());
+                }
+                bound.addItem(cc);
+                computedBindings.put(Integer.valueOf(i), binding);
+            }
+        }
+
         RowHandle header = (RowHandle) table.getHeader().get(0);
         RowHandle detail = (RowHandle) table.getDetail().get(0);
         for (int i = 0; i < cols.size(); i++) {
@@ -453,7 +488,12 @@ public final class ReportBuilder {
             if (col.resultColumn() != null) {
                 item.setResultSetColumn(col.resultColumn());
             } else {
-                item.setValueExpr(col.expr());
+                String binding = computedBindings.get(Integer.valueOf(i));
+                if (binding != null) {
+                    item.setResultSetColumn(binding);
+                } else {
+                    item.setValueExpr(col.expr());
+                }
             }
             if (col.align() != null) {
                 item.setProperty("textAlign", col.align());
@@ -482,7 +522,116 @@ public final class ReportBuilder {
         if (el.groupBy() != null) {
             addGroup(factory, table, el, name, cols.size());
         }
+
+        // Итоговая строка (подвал таблицы). Агрегат живёт в вычисляемой
+        // колонке таблицы (aggregateFunction + аргумент Expression), а
+        // элемент данных подвала привязывается к этой колонке — так же,
+        // как это делает дизайнер BIRT («Result Set Column» = имя колонки).
+        boolean hasTotal = false;
+        for (ReportSpec.TableColumn col : cols) {
+            if (col.total() != null) {
+                hasTotal = true;
+                break;
+            }
+        }
+        if (hasTotal) {
+            String labelText = el.totalLabel() == null ? "Итого" : el.totalLabel();
+            int labelIndex = -1;
+            if (!labelText.isEmpty()) {
+                for (int i = 0; i < cols.size(); i++) {
+                    if (cols.get(i).total() == null) {
+                        labelIndex = i;
+                        break;
+                    }
+                }
+            }
+            RowHandle footer = factory.newTableRow(cols.size());
+            for (int i = 0; i < cols.size(); i++) {
+                ReportSpec.TableColumn col = cols.get(i);
+                CellHandle fc = (CellHandle) footer.getCells().get(i);
+                if (col.total() != null) {
+                    String binding = name + "_t" + (i + 1);
+                    ComputedColumn cc = new ComputedColumn();
+                    cc.setName(binding);
+                    cc.setDisplayName(binding);
+                    cc.setAggregateFunction(aggregateFunction(col.total()));
+                    String type = aggregateType(col.total(), spec, el, col);
+                    if (type != null) {
+                        cc.setDataType(type);
+                    }
+                    // Аргумент агрегата — ссылка на привязку самой колонки
+                    // (плоская колонка или вычисляемая): row["имя_привязки"].
+                    String ownBinding = col.resultColumn();
+                    if (ownBinding == null) {
+                        ownBinding = computedBindings.get(Integer.valueOf(i));
+                    }
+                    String argExpr = ownBinding == null
+                        ? col.expr() : "row[\"" + ownBinding + "\"]";
+                    AggregationArgument arg = new AggregationArgument();
+                    arg.setName("Expression");
+                    arg.setExpressionProperty(AggregationArgument.VALUE_MEMBER,
+                        new Expression(argExpr, ExpressionType.JAVASCRIPT));
+                    cc.addArgument(arg);
+                    if (bound != null) {
+                        bound.addItem(cc);
+                    }
+                    DataItemHandle item = factory.newDataItem(name + "_tf" + (i + 1));
+                    item.setProperty("fontFamily", FONT_FAMILY);
+                    item.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+                    if (col.align() != null) {
+                        item.setProperty("textAlign", col.align());
+                    }
+                    item.setResultSetColumn(binding);
+                    fc.getContent().add(item);
+                } else if (i == labelIndex) {
+                    LabelHandle lab = factory.newLabel(name + "_tl");
+                    lab.setText(labelText);
+                    lab.setProperty("fontFamily", FONT_FAMILY);
+                    lab.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+                    lab.setProperty("textAlign", col.align() == null ? "left" : col.align());
+                    fc.getContent().add(lab);
+                }
+            }
+            table.getFooter().add(footer);
+        }
         return table;
+    }
+
+    /** Функция агрегата BIRT по имени итога из спецификации. */
+    private static String aggregateFunction(String total) {
+        if ("count".equals(total)) {
+            return DesignChoiceConstants.AGGREGATION_FUNCTION_COUNT;
+        }
+        if ("avg".equals(total)) {
+            return DesignChoiceConstants.AGGREGATION_FUNCTION_AVERAGE;
+        }
+        if ("min".equals(total)) {
+            return DesignChoiceConstants.AGGREGATION_FUNCTION_MIN;
+        }
+        if ("max".equals(total)) {
+            return DesignChoiceConstants.AGGREGATION_FUNCTION_MAX;
+        }
+        return DesignChoiceConstants.AGGREGATION_FUNCTION_SUM;
+    }
+
+    /** Тип вычисляемой колонки для итога (для format-правил движка). */
+    private static String aggregateType(String total, ReportSpec spec,
+            ReportSpec.Table el, ReportSpec.TableColumn col) {
+        if ("count".equals(total)) {
+            return "integer";
+        }
+        if ("sum".equals(total) || "avg".equals(total)) {
+            return "decimal";
+        }
+        if (col.type() != null) {
+            return col.type();
+        }
+        String ref = col.resultColumn();
+        if (ref == null && col.refs().size() == 1) {
+            ref = col.refs().get(0);
+        }
+        String type = ref == null ? null : resultColumnType(spec, el, ref);
+        return type == null ? "string" : type;
     }
 
     /** Группировка строк: заголовок группы со значением ключа и (опционально) счётчик. */

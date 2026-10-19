@@ -9,7 +9,7 @@ package com.aisql.birt.core;
 public final class AiBirtCore {
 
     /** Версия плагина (совпадает с Bundle-Version бандлов). */
-    public static final String VERSION = "0.3.0";
+    public static final String VERSION = "0.4.0";
 
     /** Строка в журнале Eclipse, по которой установка проверяет загрузку UI-плагина. */
     public static final String START_MARKER = "AI BIRT UI plugin started";

@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: AI BIRT UI
 Bundle-SymbolicName: com.aisql.birt.ui;singleton:=true
-Bundle-Version: 0.3.0
+Bundle-Version: 0.4.0
 Bundle-Vendor: AI BIRT Plugin
 Bundle-Activator: com.aisql.birt.ui.AiBirtUiPlugin
 Bundle-ActivationPolicy: lazy
