@@ -14,10 +14,15 @@ package com.aisql.birt.core.jdbc;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Properties;
+
+import org.eclipse.birt.report.data.oda.jdbc.JDBCDriverManager;
 
 /** Чтение схемы базы данных (имена таблиц/колонок) для контекста модели. */
 public final class DbSchema {
@@ -88,7 +93,20 @@ public final class DbSchema {
 
     /** Читает схему: таблицы, представления и их колонки (без данных). */
     public static Schema read(String url, String user, String password) throws Exception {
-        Connection connection = PgJdbcConnectionFactory.open(url, user, password);
+        return read("", url, user, password);
+    }
+
+    /**
+     * Читает схему любым JDBC-драйвером. Для PostgreSQL берётся драйвер из
+     * комплекта плагина (42.7.3, поддержка SCRAM), для остальных СУБД —
+     * драйвер, установленный в BIRT/Eclipse (JDBCDriverManager ищет его в
+     * каталоге drivers), либо драйвер, доступный JVM по имени класса.
+     *
+     * @param driver класс JDBC-драйвера (пусто — PostgreSQL)
+     */
+    public static Schema read(String driver, String url, String user, String password)
+            throws Exception {
+        Connection connection = open(driver, url, user, password);
         try {
             DatabaseMetaData md = connection.getMetaData();
             String product = safe(md.getDatabaseProductName()) + " " + firstToken(safe(md.getDatabaseProductVersion()));
@@ -133,7 +151,51 @@ public final class DbSchema {
 
     /** Читает схему и сразу формирует текст для модели. */
     public static String readText(String url, String user, String password) throws Exception {
-        return toText(read(url, user, password), DEFAULT_MAX_TABLES, DEFAULT_MAX_COLUMNS);
+        return readText("", url, user, password);
+    }
+
+    /** Читает схему (любой драйвер) и сразу формирует текст для модели. */
+    public static String readText(String driver, String url, String user, String password)
+            throws Exception {
+        return toText(read(driver, url, user, password), DEFAULT_MAX_TABLES, DEFAULT_MAX_COLUMNS);
+    }
+
+    /**
+     * Открывает соединение выбранным драйвером. PostgreSQL — встроенным
+     * драйвером плагина; остальные СУБД — через JDBCDriverManager BIRT
+     * (драйверы из каталога Eclipse/BIRT), затем через DriverManager JVM.
+     */
+    static Connection open(String driver, String url, String user, String password)
+            throws Exception {
+        String d = driver == null ? "" : driver.trim();
+        if (d.isEmpty() || d.startsWith("org.postgresql.")) {
+            return PgJdbcConnectionFactory.open(url, user, password);
+        }
+        Properties props = new Properties();
+        if (user != null && !user.isEmpty()) {
+            props.setProperty("user", user);
+        }
+        if (password != null && !password.isEmpty()) {
+            props.setProperty("password", password);
+        }
+        Throwable first = null;
+        try {
+            return JDBCDriverManager.getInstance().getConnection(d, url, props, null);
+        } catch (Throwable t) {
+            first = t;
+        }
+        try {
+            Class.forName(d);
+            return DriverManager.getConnection(url, props);
+        } catch (Throwable t) {
+            if (first != null) {
+                t.addSuppressed(first);
+            }
+            if (t instanceof Exception) {
+                throw (Exception) t;
+            }
+            throw new IllegalStateException("не удалось открыть соединение драйвером " + d, t);
+        }
     }
 
     /** Текстовая форма схемы (компактно, с ограничениями по объёму). */
@@ -203,9 +265,15 @@ public final class DbSchema {
         if (schema == null || schema.isEmpty()) {
             return false;
         }
-        String s = schema.toLowerCase();
+        // Служебные схемы основных СУБД (PostgreSQL, MySQL/MariaDB,
+        // Oracle, SQL Server, H2, Derby) не попадают в текст для модели.
+        String s = schema.toLowerCase(Locale.ROOT);
         return "pg_catalog".equals(s) || "information_schema".equals(s)
-            || s.startsWith("pg_toast");
+            || s.startsWith("pg_toast")
+            || "mysql".equals(s) || "performance_schema".equals(s)
+            || "sys".equals(s) || "system".equals(s) || "sysadmin".equals(s)
+            || "outln".equals(s) || "xdb".equals(s) || "guest".equals(s)
+            || "rdsadmin".equals(s) || "sysaux".equals(s);
     }
 
     private static String safe(String s) {

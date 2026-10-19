@@ -958,6 +958,8 @@ public class ChatView extends ViewPart {
         } catch (IOException e) {
             uiAppend("Настройки не сохранены:", String.valueOf(e.getMessage()), true);
         }
+        final String driver = dialog.getDriver().isEmpty()
+            ? BirtSettings.DEFAULT_DB_DRIVER : dialog.getDriver();
         final String url = dialog.getUrl();
         final String user = dialog.getUser();
         final String password = dialog.getPassword();
@@ -968,7 +970,7 @@ public class ChatView extends ViewPart {
             protected IStatus run(IProgressMonitor monitor) {
                 long started = System.currentTimeMillis();
                 try {
-                    DbSchema.Schema schema = DbSchema.read(url, user, password);
+                    DbSchema.Schema schema = DbSchema.read(driver, url, user, password);
                     final String text = DbSchema.toText(schema,
                         DbSchema.DEFAULT_MAX_TABLES, DbSchema.DEFAULT_MAX_COLUMNS);
                     long ms = System.currentTimeMillis() - started;

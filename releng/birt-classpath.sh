@@ -99,6 +99,23 @@ if [ -n "$ODA_JDBC_JAR" ]; then
     CP="$CP$ODA_JDBC_JAR:"
 fi
 
+# Вложенные библиотеки движка BIRT (lib/*.jar внутри бандла): в Eclipse они
+# видны через Bundle-ClassPath, в standalone-запуске их нужно распаковать.
+# Tidy.jar нужен для HTML-элементов текста (<value-of> в колонтитулах и т.п.).
+ENGINE_JAR="$(pick 'org.eclipse.birt.report.engine_*.jar')"
+EMBED_DIR="$ROOT/build/birt-embed"
+if [ -n "$ENGINE_JAR" ] && [ -f "$ENGINE_JAR" ]; then
+    if [ ! -f "$EMBED_DIR/Tidy.jar" ]; then
+        mkdir -p "$EMBED_DIR"
+        unzip -o -j "$ENGINE_JAR" 'lib/*.jar' -d "$EMBED_DIR" >/dev/null 2>&1 || true
+    fi
+    for j in "$EMBED_DIR"/*.jar; do
+        if [ -f "$j" ]; then
+            CP="$CP$j:"
+        fi
+    done
+fi
+
 # Современный драйвер PostgreSQL из состава плагина.
 PG_JAR="$ROOT/bundles/com.aisql.birt.core/lib/postgresql-42.7.3.jar"
 if [ -f "$PG_JAR" ]; then

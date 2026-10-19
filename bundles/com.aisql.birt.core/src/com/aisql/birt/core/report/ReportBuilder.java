@@ -14,6 +14,7 @@ import com.aisql.birt.core.spec.ReportSpec;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import com.ibm.icu.util.ULocale;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import org.eclipse.birt.report.model.api.AutoTextHandle;
 import org.eclipse.birt.report.model.api.CachedMetaDataHandle;
 import org.eclipse.birt.report.model.api.CellHandle;
 import org.eclipse.birt.report.model.api.ColumnHandle;
@@ -33,6 +35,7 @@ import org.eclipse.birt.report.model.api.DesignEngine;
 import org.eclipse.birt.report.model.api.ElementFactory;
 import org.eclipse.birt.report.model.api.Expression;
 import org.eclipse.birt.report.model.api.ExpressionType;
+import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
 import org.eclipse.birt.report.model.api.OdaDataSourceHandle;
@@ -46,11 +49,14 @@ import org.eclipse.birt.report.model.api.SlotHandle;
 import org.eclipse.birt.report.model.api.StructureFactory;
 import org.eclipse.birt.report.model.api.TableGroupHandle;
 import org.eclipse.birt.report.model.api.TableHandle;
+import org.eclipse.birt.report.model.api.TextItemHandle;
 import org.eclipse.birt.report.model.api.elements.DesignChoiceConstants;
 import org.eclipse.birt.report.model.api.elements.structures.AggregationArgument;
 import org.eclipse.birt.report.model.api.elements.structures.CachedMetaData;
 import org.eclipse.birt.report.model.api.elements.structures.ColumnHint;
 import org.eclipse.birt.report.model.api.elements.structures.ComputedColumn;
+import org.eclipse.birt.report.model.api.elements.structures.FilterCondition;
+import org.eclipse.birt.report.model.api.elements.structures.HighlightRule;
 import org.eclipse.birt.report.model.api.elements.structures.OdaDataSetParameter;
 import org.eclipse.birt.report.model.api.elements.structures.ResultSetColumn;
 
@@ -228,6 +234,114 @@ public final class ReportBuilder {
             setMargin(page.getLeftMargin(), spec.page().marginMm(3));
         }
         design.getMasterPages().add(page);
+        if (spec.page().hasHeader()) {
+            addPageBand(factory, page.getPageHeader(), spec.page().header(),
+                spec.title(), "pageHeader");
+        }
+        if (spec.page().hasFooter()) {
+            addPageBand(factory, page.getPageFooter(), spec.page().footer(),
+                spec.title(), "pageFooter");
+        }
+        if (!spec.page().showHeaderOnFirst()) {
+            page.setProperty("showHeaderOnFirst", Boolean.FALSE);
+        }
+        if (!spec.page().showFooterOnLast()) {
+            page.setProperty("showFooterOnLast", Boolean.FALSE);
+        }
+    }
+
+    /**
+     * Колонтитул страницы. Слот BIRT держит ровно один элемент, поэтому
+     * шаблон с подстановками {page}/{pages}/{title}/{date} собирается в один
+     * ряд сетки (grid) из надписей и auto-text — так делает и конструктор BIRT.
+     * {date} рисуется текстовым элементом с HTML-выражением new Date().
+     */
+    private static void addPageBand(ElementFactory factory, SlotHandle slot,
+            String template, String reportTitle, String name) throws Exception {
+        List<String> parts = new ArrayList<String>();
+        List<String> kinds = new ArrayList<String>();
+        StringBuilder text = new StringBuilder();
+        int i = 0;
+        while (i < template.length()) {
+            if (template.startsWith("{page}", i)) {
+                addPart(parts, kinds, text, "page");
+                i += 6;
+            } else if (template.startsWith("{pages}", i)) {
+                addPart(parts, kinds, text, "pages");
+                i += 7;
+            } else if (template.startsWith("{title}", i)) {
+                addPart(parts, kinds, text, "title");
+                i += 7;
+            } else if (template.startsWith("{date}", i)) {
+                addPart(parts, kinds, text, "date");
+                i += 6;
+            } else {
+                text.append(template.charAt(i));
+                i++;
+            }
+        }
+        addPart(parts, kinds, text, null);
+
+        if (parts.isEmpty()) {
+            return;
+        }
+        // Одна надпись без подстановок — сразу в слот, без обёртки-сетки.
+        if (parts.size() == 1 && "text".equals(kinds.get(0))) {
+            slot.add(createPageLabel(factory, name + "_l", parts.get(0)));
+            return;
+        }
+        GridHandle grid = factory.newGridItem(name + "Grid", parts.size(), 1);
+        RowHandle row = (RowHandle) grid.getRows().get(0);
+        for (int k = 0; k < parts.size(); k++) {
+            String kind = kinds.get(k);
+            String value = parts.get(k);
+            CellHandle cell = (CellHandle) row.getCells().get(k);
+            if (value == null || value.isEmpty()) {
+                continue;
+            }
+            if ("page".equals(kind)) {
+                AutoTextHandle at = factory.newAutoText(name + "_pg");
+                at.setAutoTextType(DesignChoiceConstants.AUTO_TEXT_PAGE_NUMBER);
+                at.setProperty("fontFamily", FONT_FAMILY);
+                cell.getContent().add(at);
+            } else if ("pages".equals(kind)) {
+                AutoTextHandle at = factory.newAutoText(name + "_pgs");
+                at.setAutoTextType(DesignChoiceConstants.AUTO_TEXT_TOTAL_PAGE);
+                at.setProperty("fontFamily", FONT_FAMILY);
+                cell.getContent().add(at);
+            } else if ("date".equals(kind)) {
+                TextItemHandle item = factory.newTextItem(name + "_dt");
+                item.setContentType(DesignChoiceConstants.TEXT_CONTENT_TYPE_HTML);
+                item.setContent("<value-of>new Date()</value-of>");
+                item.setProperty("fontFamily", FONT_FAMILY);
+                cell.getContent().add(item);
+            } else {
+                String labelText = "title".equals(kind) ? reportTitle : value;
+                cell.getContent().add(createPageLabel(factory, name + "_l" + k, labelText));
+            }
+        }
+        slot.add(grid);
+    }
+
+    private static void addPart(List<String> parts, List<String> kinds,
+            StringBuilder text, String kind) {
+        if (text.length() > 0) {
+            parts.add(text.toString());
+            kinds.add("text");
+            text.setLength(0);
+        }
+        if (kind != null) {
+            parts.add(kind);
+            kinds.add(kind);
+        }
+    }
+
+    private static LabelHandle createPageLabel(ElementFactory factory, String name, String text)
+            throws Exception {
+        LabelHandle label = factory.newLabel(name);
+        label.setText(text);
+        label.setProperty("fontFamily", FONT_FAMILY);
+        return label;
     }
 
     private static void setMargin(org.eclipse.birt.report.model.api.DimensionHandle handle,
@@ -417,6 +531,12 @@ public final class ReportBuilder {
         Set<String> boundNames = new LinkedHashSet<String>();
         for (ReportSpec.TableColumn col : cols) {
             boundNames.addAll(col.refs());
+            for (ReportSpec.Highlight h : col.highlights()) {
+                boundNames.addAll(h.refs());
+            }
+        }
+        if (el.filter() != null) {
+            boundNames.addAll(ReportSpec.exprRefs(el.filter()));
         }
         if (el.groupBy() != null) {
             boundNames.add(el.groupBy());
@@ -467,6 +587,16 @@ public final class ReportBuilder {
             }
         }
 
+        // Условие отбора строк (filter таблицы): выражение-предикат из
+        // спецификации проверяется оператором «истина». Ссылки row["..."]
+        // разрешаются по привязкам таблицы (boundDataColumns выше).
+        if (el.filter() != null) {
+            FilterCondition fc = new FilterCondition();
+            fc.setExpr(el.filter());
+            fc.setOperator(DesignChoiceConstants.FILTER_OPERATOR_TRUE);
+            table.getPropertyHandle("filter").addItem(fc);
+        }
+
         RowHandle header = (RowHandle) table.getHeader().get(0);
         RowHandle detail = (RowHandle) table.getDetail().get(0);
         for (int i = 0; i < cols.size(); i++) {
@@ -512,6 +642,22 @@ public final class ReportBuilder {
                 dc.setProperty("backgroundColor", col.background());
             }
             dc.getContent().add(item);
+
+            // Условное форматирование строк: правило на элементе данных
+            // (цвет/начертание текста) и копия на ячейке, чтобы фон
+            // окрашивался по всей ячейке, как в отчётах конструктора BIRT.
+            for (ReportSpec.Highlight h : col.highlights()) {
+                PropertyHandle itemRules = item.getPropertyHandle("highlightRules");
+                if (itemRules != null) {
+                    itemRules.addItem(createHighlightRule(h));
+                }
+                if (h.background() != null) {
+                    PropertyHandle cellRules = dc.getPropertyHandle("highlightRules");
+                    if (cellRules != null) {
+                        cellRules.addItem(createHighlightRule(h));
+                    }
+                }
+            }
 
             if (col.widthMm() != null) {
                 ((ColumnHandle) table.getColumns().get(i)).getWidth()
@@ -595,6 +741,32 @@ public final class ReportBuilder {
             table.getFooter().add(footer);
         }
         return table;
+    }
+
+    /** Правило условного оформления (highlight rule) из спецификации. */
+    private static HighlightRule createHighlightRule(ReportSpec.Highlight h)
+            throws Exception {
+        HighlightRule rule = new HighlightRule();
+        rule.setTestExpression(h.when());
+        // Правило с истинным условием: operator=is-true + выражение testExpr
+        // (так же хранит правила конструктор BIRT: без operator правило
+        // движком не применяется).
+        rule.setOperator(DesignChoiceConstants.FILTER_OPERATOR_TRUE);
+        if (h.background() != null) {
+            rule.setProperty(HighlightRule.BACKGROUND_COLOR_MEMBER, h.background());
+        }
+        if (h.color() != null) {
+            rule.setProperty(HighlightRule.COLOR_MEMBER, h.color());
+        }
+        if (h.bold()) {
+            rule.setProperty(HighlightRule.FONT_WEIGHT_MEMBER,
+                DesignChoiceConstants.FONT_WEIGHT_BOLD);
+        }
+        if (h.italic()) {
+            rule.setProperty(HighlightRule.FONT_STYLE_MEMBER,
+                DesignChoiceConstants.FONT_STYLE_ITALIC);
+        }
+        return rule;
     }
 
     /** Функция агрегата BIRT по имени итога из спецификации. */

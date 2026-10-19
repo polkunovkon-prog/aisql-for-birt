@@ -205,6 +205,68 @@ public final class ReportSpecTest {
             "не описана");
         expectProblems(extended.replace("\"total\": \"sum\"", "\"total\": \"среднее\""),
             "допустимы");
+
+        // 9. Условия (filter, highlight) и колонтитулы страницы
+        String conditions = "{"
+            + " \"report\": { \"name\": \"cond\", \"title\": \"Условия\","
+            + "   \"page\": { \"header\": \"{title} — {page} из {pages}\", \"footer\": \"{date}\","
+            + "               \"show_header_on_first\": false } },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name, grade_level from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsA\", \"filter\": \"row[\\\"grade_level\\\"] >= 5\","
+            + "     \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" },"
+            + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\","
+            + "         \"highlight\": [ { \"when\": \"row[\\\"grade_level\\\"] < 3\","
+            + "                           \"color\": \"#B00020\", \"background\": \"#FFD5D5\", \"bold\": true } ] } ] } ]"
+            + "}";
+        ReportSpec cond = ReportSpec.parse(conditions);
+        T.check(cond.page().hasHeader() && cond.page().header().contains("{page}"),
+            "колонтитул: верхний шаблон принят");
+        T.check(cond.page().hasFooter() && "{date}".equals(cond.page().footer()),
+            "колонтитул: нижний шаблон принят");
+        T.check(!cond.page().showHeaderOnFirst(), "колонтитул: отключение на первой странице");
+        ReportSpec.Table condTable = (ReportSpec.Table) cond.body().get(0);
+        T.eq("row[\"grade_level\"] >= 5", condTable.filter(), "условие: фильтр таблицы");
+        ReportSpec.TableColumn condCol = condTable.columns().get(1);
+        T.eq(1, condCol.highlights().size(), "условие: одно правило оформления");
+        ReportSpec.Highlight condRule = condCol.highlights().get(0);
+        T.eq("row[\"grade_level\"] < 3", condRule.when(), "условие: выражение правила");
+        T.check("#FFD5D5".equals(condRule.background()) && condRule.bold()
+            && "#B00020".equals(condRule.color()), "условие: фон, цвет и жирный шрифт");
+        T.eq(1, condRule.refs().size(), "условие: ссылки правила");
+        String condSummary = cond.summary();
+        T.check(condSummary.contains("отбор строк"), "сводка: условие отбора");
+        T.check(condSummary.contains("условий оформления"), "сводка: условное оформление");
+        T.check(condSummary.contains("Колонтитулы"), "сводка: колонтитулы");
+
+        ReportSpec condAgain = ReportSpec.parse(cond.toJson());
+        ReportSpec.Table condTable2 = (ReportSpec.Table) condAgain.body().get(0);
+        T.eq("row[\"grade_level\"] >= 5", condTable2.filter(), "оборот: фильтр таблицы");
+        T.eq(1, condTable2.columns().get(1).highlights().size(), "оборот: правила оформления");
+        T.eq("row[\"grade_level\"] < 3",
+            condTable2.columns().get(1).highlights().get(0).when(), "оборот: выражение правила");
+        T.check(!condAgain.page().showHeaderOnFirst(), "оборот: флаг первой страницы");
+        T.check("{date}".equals(condAgain.page().footer()), "оборот: нижний колонтитул");
+
+        // Ошибки условий и колонтитулов
+        expectProblems(conditions.replace("row[\\\"grade_level\\\"] >= 5",
+            "row[\\\"grade_level\\\"] >= 5; drop"), "недопустимые символы");
+        expectProblems(conditions.replace("row[\\\"grade_level\\\"] >= 5", "1 == 1"),
+            "нужно условие с row");
+        expectProblems(conditions.replace("row[\\\"grade_level\\\"] < 3",
+            "row[\\\"нет_колонки\\\"] < 3"), "не описана");
+        expectProblems(conditions.replace("\"bold\": true", "\"жирный\": true"),
+            "неизвестное поле");
+        expectProblems(conditions.replace(
+            "\"color\": \"#B00020\", \"background\": \"#FFD5D5\", \"bold\": true",
+            "\"italic\": false"), "хотя бы одно оформление");
     }
 
     /** Спецификация с таблицей: SQL, params и доп. поля колонок задаются извне. */

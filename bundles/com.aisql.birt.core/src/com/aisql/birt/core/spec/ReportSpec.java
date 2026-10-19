@@ -36,6 +36,7 @@ public final class ReportSpec {
     /** Пределы — защита от «фантазий» модели. */
     public static final int MAX_BODY_ELEMENTS = 60;
     public static final int MAX_TABLE_COLUMNS = 30;
+    public static final int MAX_HIGHLIGHTS = 10;
     public static final int MAX_PARAMETERS = 20;
     public static final int MAX_DATASETS = 20;
     public static final int MAX_DATASOURCES = 5;
@@ -95,17 +96,39 @@ public final class ReportSpec {
         private final String orientation;
         /** Поля в миллиметрах: top, right, bottom, left; null — не задано. */
         private final Double[] marginsMm;
+        /**
+         * Шаблон верхнего колонтитула; поддерживаются подстановки
+         * {page} — номер страницы, {pages} — всего страниц,
+         * {title} — заголовок отчёта, {date} — дата печати; null — нет.
+         */
+        private final String header;
+        /** Шаблон нижнего колонтитула (те же подстановки); null — нет. */
+        private final String footer;
+        private final boolean showHeaderOnFirst;
+        private final boolean showFooterOnLast;
 
-        Page(String format, String orientation, Double[] marginsMm) {
+        Page(String format, String orientation, Double[] marginsMm,
+                String header, String footer,
+                boolean showHeaderOnFirst, boolean showFooterOnLast) {
             this.format = format;
             this.orientation = orientation;
             this.marginsMm = marginsMm;
+            this.header = header;
+            this.footer = footer;
+            this.showHeaderOnFirst = showHeaderOnFirst;
+            this.showFooterOnLast = showFooterOnLast;
         }
 
         public String format() { return format; }
         public String orientation() { return orientation; }
         public Double marginMm(int i) { return marginsMm == null ? null : marginsMm[i]; }
         public boolean hasMargins() { return marginsMm != null; }
+        public String header() { return header; }
+        public String footer() { return footer; }
+        public boolean hasHeader() { return header != null && !header.isEmpty(); }
+        public boolean hasFooter() { return footer != null && !footer.isEmpty(); }
+        public boolean showHeaderOnFirst() { return showHeaderOnFirst; }
+        public boolean showFooterOnLast() { return showFooterOnLast; }
     }
 
     /** Параметр отчёта. */
@@ -225,6 +248,37 @@ public final class ReportSpec {
         @Override public String type() { return "label"; }
     }
 
+    /**
+     * Условное форматирование колонки: если выражение {@code when} истинно,
+     * к ячейке строки применяются цвет/фон/начертание.
+     */
+    public static final class Highlight {
+        private final String when;
+        private final String color;
+        private final String background;
+        private final boolean bold;
+        private final boolean italic;
+        /** Ссылки row["..."] в условии (для привязок колонок таблицы). */
+        private final List<String> refs;
+
+        Highlight(String when, String color, String background, boolean bold,
+                boolean italic, List<String> refs) {
+            this.when = when;
+            this.color = color;
+            this.background = background;
+            this.bold = bold;
+            this.italic = italic;
+            this.refs = Collections.unmodifiableList(refs);
+        }
+
+        public String when() { return when; }
+        public String color() { return color; }
+        public String background() { return background; }
+        public boolean bold() { return bold; }
+        public boolean italic() { return italic; }
+        public List<String> refs() { return refs; }
+    }
+
     /** Колонка таблицы. */
     public static final class TableColumn {
         private final String header;
@@ -243,11 +297,13 @@ public final class ReportSpec {
         private final List<String> refs;
         /** Функция итога в подвале таблицы (sum/count/avg/min/max); null — нет. */
         private final String total;
+        /** Условия условного форматирования ячеек колонки. */
+        private final List<Highlight> highlights;
 
         TableColumn(String header, String expr, Double widthMm, String align, String type,
                 boolean bold, boolean italic, String color, String background,
                 String headerBackground, String resultColumn, List<String> refs,
-                String total) {
+                String total, List<Highlight> highlights) {
             this.header = header;
             this.expr = expr;
             this.widthMm = widthMm;
@@ -261,6 +317,7 @@ public final class ReportSpec {
             this.resultColumn = resultColumn;
             this.refs = Collections.unmodifiableList(refs);
             this.total = total;
+            this.highlights = Collections.unmodifiableList(highlights);
         }
 
         public String header() { return header; }
@@ -276,6 +333,7 @@ public final class ReportSpec {
         public String resultColumn() { return resultColumn; }
         public List<String> refs() { return refs; }
         public String total() { return total; }
+        public List<Highlight> highlights() { return highlights; }
     }
 
     /** Таблица с данными. */
@@ -290,15 +348,19 @@ public final class ReportSpec {
         private final boolean groupCount;
         /** Подпись строки итогов (по умолчанию «Итого»); null — без подписи. */
         private final String totalLabel;
+        /** Условие отбора строк (row["..."] ...); null — все строки. */
+        private final String filter;
 
         Table(String dataset, List<TableColumn> columns,
-                String groupBy, String groupTitle, boolean groupCount, String totalLabel) {
+                String groupBy, String groupTitle, boolean groupCount, String totalLabel,
+                String filter) {
             this.dataset = dataset;
             this.columns = Collections.unmodifiableList(columns);
             this.groupBy = groupBy;
             this.groupTitle = groupTitle;
             this.groupCount = groupCount;
             this.totalLabel = totalLabel;
+            this.filter = filter;
         }
 
         public String dataset() { return dataset; }
@@ -307,6 +369,7 @@ public final class ReportSpec {
         public String groupTitle() { return groupTitle; }
         public boolean groupCount() { return groupCount; }
         public String totalLabel() { return totalLabel; }
+        public String filter() { return filter; }
 
         @Override public String type() { return "table"; }
     }
@@ -699,9 +762,28 @@ public final class ReportSpec {
             problems.add("report.page должен быть объектом");
             return null;
         }
-        checkUnknown(p, problems, "report.page", "format", "orientation", "margins_mm");
+        checkUnknown(p, problems, "report.page", "format", "orientation", "margins_mm",
+            "header", "footer", "show_header_on_first", "show_footer_on_last");
         String format = strField(p, "format", false, problems, "report.page");
         String orientation = strField(p, "orientation", false, problems, "report.page");
+        String header = strField(p, "header", false, problems, "report.page");
+        if (header != null && header.trim().isEmpty()) {
+            header = null;
+        }
+        if (header != null && header.length() > 200) {
+            problems.add("report.page.header длиннее 200 символов");
+            header = null;
+        }
+        String footer = strField(p, "footer", false, problems, "report.page");
+        if (footer != null && footer.trim().isEmpty()) {
+            footer = null;
+        }
+        if (footer != null && footer.length() > 200) {
+            problems.add("report.page.footer длиннее 200 символов");
+            footer = null;
+        }
+        boolean showHeaderOnFirst = Json.asBool(p.get("show_header_on_first"), true);
+        boolean showFooterOnLast = Json.asBool(p.get("show_footer_on_last"), true);
         if (format != null && !PAGE_FORMATS.contains(format)) {
             problems.add("report.page.format «" + format + "»: допустимы " + PAGE_FORMATS);
             format = null;
@@ -743,7 +825,8 @@ public final class ReportSpec {
             }
         }
         return new Page(format == null ? "A4" : format,
-            orientation == null ? "portrait" : orientation, margins);
+            orientation == null ? "portrait" : orientation, margins,
+            header, footer, showHeaderOnFirst, showFooterOnLast);
     }
 
     private static BodyElement parseLabel(Map<String, Object> e, int i, List<String> problems) {
@@ -785,7 +868,7 @@ public final class ReportSpec {
             List<String> problems, List<DataSet> datasets) {
         checkUnknown(e, problems, "body[" + i + "]",
             "type", "dataset", "columns", "group_by", "group_title", "group_count",
-            "total_label");
+            "total_label", "filter");
         String dataset = strField(e, "dataset", true, problems, "body[" + i + "]");
         DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
         if (dataset != null && ds == null) {
@@ -811,6 +894,25 @@ public final class ReportSpec {
         if (groupTitle != null && groupTitle.length() > 200) {
             problems.add("body[" + i + "].group_title длиннее 200 символов");
         }
+        String filter = strField(e, "filter", false, problems, "body[" + i + "]");
+        if (filter != null) {
+            if (!SIMPLE_EXPR_RE.matcher(filter).matches()) {
+                problems.add("body[" + i + "].filter: недопустимые символы — нужно простое "
+                    + "выражение BIRT (сравнения, row[\"колонка\"], без «;»)");
+                filter = null;
+            } else if (exprRefs(filter).isEmpty()) {
+                problems.add("body[" + i + "].filter: нужно условие с row[\"колонка\"]");
+                filter = null;
+            } else {
+                for (String ref : exprRefs(filter)) {
+                    if (ds != null && !ds.columns().isEmpty()
+                            && findDatasetColumn(ds, ref) == null) {
+                        problems.add("body[" + i + "].filter: колонка «" + ref
+                            + "» не описана в datasets." + dataset + ".columns");
+                    }
+                }
+            }
+        }
         if (groupTitle == null) {
             groupTitle = "Группа";
         }
@@ -834,7 +936,7 @@ public final class ReportSpec {
                 checkUnknown(c, problems, where,
                     "header", "expr", "width_mm", "align", "type",
                     "bold", "italic", "color", "background", "header_background",
-                    "total");
+                    "total", "highlight");
                 String header = strField(c, "header", true, problems, where);
                 String expr = strField(c, "expr", true, problems, where);
                 Double width = null;
@@ -874,6 +976,55 @@ public final class ReportSpec {
                         total = null;
                     }
                 }
+                List<Highlight> highlights = new ArrayList<Highlight>();
+                List<Object> hlRaw = arrField(c, "highlight", problems, where);
+                if (hlRaw != null) {
+                    if (hlRaw.size() > MAX_HIGHLIGHTS) {
+                        problems.add(where + ".highlight: условий больше " + MAX_HIGHLIGHTS);
+                    }
+                    int k = 0;
+                    for (Object ho : hlRaw) {
+                        k++;
+                        String hw = where + ".highlight[" + k + "]";
+                        Map<String, Object> h = Json.asObj(ho);
+                        if (h == null) {
+                            problems.add(hw + " должен быть объектом");
+                            continue;
+                        }
+                        checkUnknown(h, problems, hw,
+                            "when", "color", "background", "bold", "italic");
+                        String when = strField(h, "when", true, problems, hw);
+                        String hColor = colorField(h, "color", problems, hw);
+                        String hBackground = colorField(h, "background", problems, hw);
+                        boolean hBold = Json.asBool(h.get("bold"), false);
+                        boolean hItalic = Json.asBool(h.get("italic"), false);
+                        if (when == null) {
+                            continue;
+                        }
+                        if (!SIMPLE_EXPR_RE.matcher(when).matches()) {
+                            problems.add(hw + ".when: недопустимые символы — нужно простое "
+                                + "выражение BIRT (сравнения, row[\"колонка\"], без «;»)");
+                            continue;
+                        }
+                        List<String> hRefs = exprRefs(when);
+                        if (hRefs.isEmpty()) {
+                            problems.add(hw + ".when: нужно сравнение с row[\"колонка\"]");
+                        }
+                        for (String ref : hRefs) {
+                            if (ds != null && !ds.columns().isEmpty()
+                                    && findDatasetColumn(ds, ref) == null) {
+                                problems.add(hw + ".when: колонка «" + ref
+                                    + "» не описана в datasets." + dataset + ".columns");
+                            }
+                        }
+                        if (hColor == null && hBackground == null && !hBold && !hItalic) {
+                            problems.add(hw + ": задайте хотя бы одно оформление "
+                                + "(color/background/bold/italic)");
+                        }
+                        highlights.add(new Highlight(when, hColor, hBackground,
+                            hBold, hItalic, hRefs));
+                    }
+                }
                 if (header == null || expr == null) {
                     continue;
                 }
@@ -903,7 +1054,7 @@ public final class ReportSpec {
                 }
                 cols.add(new TableColumn(header, expr, width, align, type,
                     bold, italic, color, background, headerBackground, resultCol, refs,
-                    total));
+                    total, highlights));
             }
         }
         if (dataset == null || cols.isEmpty()) {
@@ -919,12 +1070,28 @@ public final class ReportSpec {
         if (!hasTotal) {
             totalLabel = null;
         }
-        return new Table(dataset, cols, groupBy, groupTitle, groupCount, totalLabel);
+        return new Table(dataset, cols, groupBy, groupTitle, groupCount, totalLabel,
+            filter);
     }
 
     // ------------------------------------------------------------------
     // Вспомогательные
     // ------------------------------------------------------------------
+
+    /** Ссылки row["..."]/dataSetRow["..."] в простом выражении (в порядке появления). */
+    public static List<String> exprRefs(String expr) {
+        List<String> refs = new ArrayList<String>();
+        if (expr == null) {
+            return refs;
+        }
+        Matcher rm = EXPR_REF_RE.matcher(expr);
+        while (rm.find()) {
+            if (!refs.contains(rm.group(1))) {
+                refs.add(rm.group(1));
+            }
+        }
+        return refs;
+    }
 
     private static void checkUnknown(Map<String, Object> map, List<String> problems,
             String where, String... allowed) {
@@ -1113,6 +1280,18 @@ public final class ReportSpec {
                 }
                 pg.put("margins_mm", m);
             }
+            if (page.hasHeader()) {
+                pg.put("header", page.header());
+            }
+            if (page.hasFooter()) {
+                pg.put("footer", page.footer());
+            }
+            if (!page.showHeaderOnFirst()) {
+                pg.put("show_header_on_first", Boolean.FALSE);
+            }
+            if (!page.showFooterOnLast()) {
+                pg.put("show_footer_on_last", Boolean.FALSE);
+            }
             report.put("page", pg);
         }
         root.put("report", report);
@@ -1213,6 +1392,9 @@ public final class ReportSpec {
                 if (t.totalLabel() != null && !"Итого".equals(t.totalLabel())) {
                     tm.put("total_label", t.totalLabel());
                 }
+                if (t.filter() != null) {
+                    tm.put("filter", t.filter());
+                }
                 List<Object> cs = Json.arr();
                 for (TableColumn c : t.columns()) {
                     Map<String, Object> cm = Json.obj();
@@ -1245,6 +1427,27 @@ public final class ReportSpec {
                     if (c.total() != null) {
                         cm.put("total", c.total());
                     }
+                    if (!c.highlights().isEmpty()) {
+                        List<Object> hs = Json.arr();
+                        for (Highlight h : c.highlights()) {
+                            Map<String, Object> hm = Json.obj();
+                            hm.put("when", h.when());
+                            if (h.color() != null) {
+                                hm.put("color", h.color());
+                            }
+                            if (h.background() != null) {
+                                hm.put("background", h.background());
+                            }
+                            if (h.bold()) {
+                                hm.put("bold", Boolean.TRUE);
+                            }
+                            if (h.italic()) {
+                                hm.put("italic", Boolean.TRUE);
+                            }
+                            hs.add(hm);
+                        }
+                        cm.put("highlight", hs);
+                    }
                     cs.add(cm);
                 }
                 tm.put("columns", cs);
@@ -1267,6 +1470,19 @@ public final class ReportSpec {
                 sb.append(", поля (мм): ").append(fmt(page.marginMm(0))).append('/')
                     .append(fmt(page.marginMm(1))).append('/').append(fmt(page.marginMm(2)))
                     .append('/').append(fmt(page.marginMm(3)));
+            }
+            sb.append('\n');
+        }
+        if (page != null && (page.hasHeader() || page.hasFooter())) {
+            sb.append("Колонтитулы: ");
+            if (page.hasHeader()) {
+                sb.append("верх «").append(ellipsis(page.header(), 40)).append('»');
+            }
+            if (page.hasFooter()) {
+                if (page.hasHeader()) {
+                    sb.append(", ");
+                }
+                sb.append("низ «").append(ellipsis(page.footer(), 40)).append('»');
             }
             sb.append('\n');
         }
@@ -1327,14 +1543,22 @@ public final class ReportSpec {
                     sb.append("; группировка «").append(t.groupTitle())
                         .append("» по ").append(t.groupBy());
                 }
+                if (t.filter() != null) {
+                    sb.append("; отбор строк: ").append(ellipsis(t.filter(), 40));
+                }
                 int totals = 0;
+                int highlights = 0;
                 for (int j = 0; j < t.columns().size(); j++) {
                     if (t.columns().get(j).total() != null) {
                         totals++;
                     }
+                    highlights += t.columns().get(j).highlights().size();
                 }
                 if (totals > 0) {
                     sb.append("; итоги: ").append(totals);
+                }
+                if (highlights > 0) {
+                    sb.append("; условий оформления: ").append(highlights);
                 }
             }
         }

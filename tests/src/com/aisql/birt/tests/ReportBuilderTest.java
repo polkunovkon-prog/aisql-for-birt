@@ -27,6 +27,7 @@ import org.eclipse.birt.report.model.api.ComputedColumnHandle;
 import org.eclipse.birt.report.model.api.DataItemHandle;
 import org.eclipse.birt.report.model.api.DesignConfig;
 import org.eclipse.birt.report.model.api.DesignEngine;
+import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
 import org.eclipse.birt.report.model.api.MasterPageHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
@@ -35,6 +36,7 @@ import org.eclipse.birt.report.model.api.ReportDesignHandle;
 import org.eclipse.birt.report.model.api.RowHandle;
 import org.eclipse.birt.report.model.api.ScalarParameterHandle;
 import org.eclipse.birt.report.model.api.SessionHandle;
+import org.eclipse.birt.report.model.api.SimpleMasterPageHandle;
 import org.eclipse.birt.report.model.api.TableGroupHandle;
 import org.eclipse.birt.report.model.api.TableHandle;
 
@@ -94,6 +96,30 @@ public final class ReportBuilderTest {
             + "         \"background\": \"#EEF2F7\", \"header_background\": \"#DDDDE0\" },"
             + "       { \"header\": \"Балл\", \"expr\": \"row[\\\"grade_level\\\"] * 10\","
             + "         \"italic\": true, \"align\": \"right\", \"total\": \"sum\" } ] } ]"
+            + "}";
+    }
+
+    /** Спецификация с условиями (filter/highlight) и колонтитулами. */
+    private static String conditionsSpecJson() {
+        return "{"
+            + " \"report\": { \"name\": \"students_cond\", \"title\": \"Условия\","
+            + "   \"page\": { \"header\": \"{title} — {page} из {pages}\", \"footer\": \"{date}\","
+            + "               \"show_header_on_first\": false } },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "                        \"driver\": \"org.postgresql.Driver\","
+            + "                        \"url\": \"jdbc:postgresql://127.0.0.1:5432/hogwarts\","
+            + "                        \"user\": \"agent_user\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsStudents\", \"datasource\": \"dsDB\","
+            + "                    \"sql\": \"select last_name, grade_level from students\","
+            + "                    \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsStudents\","
+            + "     \"filter\": \"row[\\\"grade_level\\\"] >= 5\", \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" },"
+            + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\","
+            + "         \"highlight\": [ { \"when\": \"row[\\\"grade_level\\\"] < 3\","
+            + "                           \"background\": \"#FFD5D5\", \"bold\": true } ] } ] } ]"
             + "}";
     }
 
@@ -262,6 +288,52 @@ public final class ReportBuilderTest {
             "чтение пароля из файла отчёта");
         T.eq(null, ReportBuilder.readPassword(new File(dir, "нет-такого.rptdesign")),
             "чтение пароля: отсутствующий файл");
+
+        // --- Условия (filter/highlight) и колонтитулы страницы ---
+        ReportSpec cond = ReportSpec.parse(conditionsSpecJson());
+        File condTarget = new File(dir, cond.name() + ".rptdesign");
+        ReportBuilder.build(cond, condTarget, "parol-dlya-testa");
+        T.check(condTarget.isFile(), "файл отчёта с условиями создан");
+
+        String condXml = new String(Files.readAllBytes(condTarget.toPath()),
+            StandardCharsets.UTF_8);
+        T.check(condXml.contains("highlightRules"), "условие: правила оформления записаны");
+        T.check(condXml.contains("<list-property name=\"filter\">")
+            || condXml.contains("filter-condition"), "условие: фильтр таблицы записан");
+        T.check(condXml.contains("<page-header>") && condXml.contains("<page-footer>"),
+            "колонтитулы: верхний и нижний записаны");
+        T.check(condXml.contains("auto-text") && condXml.contains("total-page"),
+            "колонтитулы: нумерация страниц");
+        T.check(condXml.contains("new Date()"), "колонтитулы: дата печати");
+        T.check(condXml.contains("showHeaderOnFirst"), "колонтитулы: флаг первой страницы");
+
+        SessionHandle condSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle design = condSession.openDesign(condTarget.getAbsolutePath());
+            SimpleMasterPageHandle condPage = (SimpleMasterPageHandle) design.getMasterPages().get(0);
+            T.eq(1, condPage.getPageHeader().getCount(), "колонтитулы: один элемент в верхнем слоте");
+            GridHandle headerGrid = (GridHandle) condPage.getPageHeader().get(0);
+            RowHandle headerRow = (RowHandle) headerGrid.getRows().get(0);
+            T.eq(5, headerRow.getCells().getCount(),
+                "колонтитулы: заголовок, номер, текст и всего страниц");
+            T.eq(1, condPage.getPageFooter().getCount(), "колонтитулы: один элемент в нижнем слоте");
+            T.eq(Boolean.FALSE, condPage.getProperty("showHeaderOnFirst"),
+                "колонтитулы: верхний не печатается на первой странице");
+
+            TableHandle condTable = (TableHandle) design.getBody().get(0);
+            T.eq(1, condTable.getPropertyHandle("filter").getListValue().size(),
+                "условие: фильтр таблицы один");
+            RowHandle condDetail = (RowHandle) condTable.getDetail().get(0);
+            CellHandle condCell = (CellHandle) condDetail.getCells().get(1);
+            T.eq(1, condCell.getPropertyHandle("highlightRules").getListValue().size(),
+                "условие: правило оформления на ячейке");
+            DataItemHandle condItem = (DataItemHandle) condCell.getContent().get(0);
+            T.eq(1, condItem.getPropertyHandle("highlightRules").getListValue().size(),
+                "условие: правило оформления на элементе данных");
+        } finally {
+            condSession.closeAll(false);
+        }
 
         // Пустая спецификация не принимается.
         try {

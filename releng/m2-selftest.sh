@@ -3,8 +3,9 @@
 # Приёмка M2 (standalone, без Eclipse): «спецификация → .rptdesign → PDF/HTML».
 #
 # 1) запускает ReportSelfTest на JDK 8 с classpath из releng/birt-classpath.sh;
-# 2) собирает отчёты из спецификаций (по умолчанию две: базовая и с
-#    группировкой, стилями и вычисляемой колонкой);
+# 2) собирает отчёты из спецификаций (по умолчанию три: базовая; с группировкой,
+#    стилями и вычисляемой колонкой; с условиями отбора/оформления и
+#    колонтитулами);
 # 3) рендерит PDF и HTML штатным движком BIRT;
 # 4) проверяет, что в HTML и PDF есть настоящие данные из базы;
 # 5) читает схему БД (только метаданные) инструментом DbSchemaTool.
@@ -31,6 +32,7 @@ else
     SPECS=(
         "$ROOT/tests/samples/students-by-house.spec.json"
         "$ROOT/tests/samples/students-by-house-groups.spec.json"
+        "$ROOT/tests/samples/students-conditions.spec.json"
     )
 fi
 
@@ -91,6 +93,28 @@ check_spec() {
         echo "ОШИБКА: в HTML есть ошибки привязок колонок ($name)" >&2
         exit 1
     fi
+
+    # Спецификация с условиями: подсветка ячеек, отбор строк, колонтитулы.
+    case "$name" in
+    students-conditions.spec.json)
+        if grep -q 'rgb(255, 213, 213)' "$html"; then
+            echo "Условия: условное оформление ячеек найдено в HTML"
+        else
+            echo "ОШИБКА: в HTML нет условного оформления (rgb(255,213,213)) ($name)" >&2
+            exit 1
+        fi
+        if grep -q 'Слизерин' "$html"; then
+            echo "ОШИБКА: фильтр таблицы не отсеял строки (найден «Слизерин») ($name)" >&2
+            exit 1
+        fi
+        if grep -q 'Дата печати' "$html"; then
+            echo "Колонтитулы: нижний колонтитул с датой найден в HTML"
+        else
+            echo "ОШИБКА: в HTML нет нижнего колонтитула ($name)" >&2
+            exit 1
+        fi
+        ;;
+    esac
 
     for token in $EXPECT; do
         if grep -q "$token" "$html"; then

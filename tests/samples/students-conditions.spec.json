@@ -1,0 +1,76 @@
+{
+  "report": {
+    "name": "students_conditions",
+    "title": "Студенты: условия и колонтитулы",
+    "page": {
+      "format": "A4",
+      "orientation": "portrait",
+      "margins_mm": { "top": 10, "right": 10, "bottom": 10, "left": 15 },
+      "header": "{title} — стр. {page} из {pages}",
+      "footer": "Дата печати: {date}"
+    }
+  },
+  "datasources": [
+    {
+      "name": "dsHogwarts",
+      "kind": "jdbc",
+      "driver": "org.postgresql.Driver",
+      "url": "jdbc:postgresql://127.0.0.1:5432/hogwarts",
+      "user": "agent_user"
+    }
+  ],
+  "datasets": [
+    {
+      "name": "dsStudents",
+      "datasource": "dsHogwarts",
+      "sql": "select p.last_name, h.name as house_name, s.grade_level from students s join people p on p.id = s.person_id join houses h on h.id = s.house_id order by h.name, p.last_name",
+      "columns": [
+        { "name": "last_name", "type": "string" },
+        { "name": "house_name", "type": "string" },
+        { "name": "grade_level", "type": "integer" }
+      ]
+    }
+  ],
+  "body": [
+    {
+      "type": "label",
+      "text": "Студенты Хогвартса: отбор строк и условное оформление",
+      "size_pt": 14,
+      "bold": true,
+      "align": "center",
+      "color": "#334455"
+    },
+    {
+      "type": "table",
+      "dataset": "dsStudents",
+      "filter": "row[\"house_name\"] != \"Слизерин\"",
+      "columns": [
+        {
+          "header": "Фамилия",
+          "expr": "row[\"last_name\"]",
+          "width_mm": 60,
+          "header_background": "#DDDDE0"
+        },
+        {
+          "header": "Факультет",
+          "expr": "row[\"house_name\"]",
+          "width_mm": 45,
+          "header_background": "#DDDDE0",
+          "highlight": [
+            { "when": "row[\"house_name\"] == \"Гриффиндор\"", "color": "#1B5E20", "bold": true }
+          ]
+        },
+        {
+          "header": "Курс",
+          "expr": "row[\"grade_level\"]",
+          "width_mm": 18,
+          "align": "center",
+          "header_background": "#DDDDE0",
+          "highlight": [
+            { "when": "row[\"grade_level\"] < 4", "background": "#FFD5D5", "color": "#B00020", "bold": true }
+          ]
+        }
+      ]
+    }
+  ]
+}
