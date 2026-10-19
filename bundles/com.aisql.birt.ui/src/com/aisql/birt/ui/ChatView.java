@@ -680,6 +680,12 @@ public class ChatView extends ViewPart {
         if (password == null) {
             password = ReportBuilder.readPassword(file);
         }
+        // Ограничение BIRT 4.7: пароль с символами вне ASCII читается из
+        // скрытого свойства с потерей символов («?») — в этом случае лучше
+        // спросить пароль заново, чем молча применить испорченный.
+        if (password != null && password.indexOf('?') >= 0) {
+            password = null;
+        }
         final ReportSpec.DataSource source = newSpec.singleDataSource();
         if ((password == null || password.isEmpty()) && source != null && !source.hasPassword()) {
             final String[] typed = new String[1];

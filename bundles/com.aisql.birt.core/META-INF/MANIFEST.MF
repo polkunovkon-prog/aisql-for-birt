@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: AI BIRT Core
 Bundle-SymbolicName: com.aisql.birt.core;singleton:=true
-Bundle-Version: 0.2.0
+Bundle-Version: 0.3.0
 Bundle-Vendor: AI BIRT Plugin
 Bundle-RequiredExecutionEnvironment: JavaSE-1.8
 Bundle-ClassPath: .,
@@ -12,6 +12,7 @@ Require-Bundle: org.eclipse.birt.report.model,
  org.eclipse.birt.report.engine
 Import-Package: com.ibm.icu.text;version="3.4.4",
  com.ibm.icu.util;version="3.4.4"
-Export-Package: com.aisql.birt.core;version="0.2.0",
- com.aisql.birt.core.report;version="0.2.0",
- com.aisql.birt.core.spec;version="0.2.0"
+Export-Package: com.aisql.birt.core;version="0.3.0",
+ com.aisql.birt.core.report;version="0.3.0",
+ com.aisql.birt.core.spec;version="0.3.0",
+ com.aisql.birt.core.jdbc;version="0.3.0"

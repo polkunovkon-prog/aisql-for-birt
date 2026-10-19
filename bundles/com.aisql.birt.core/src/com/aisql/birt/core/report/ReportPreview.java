@@ -93,7 +93,7 @@ public final class ReportPreview {
                         value = p.def();
                     }
                     if (value != null) {
-                        task.setParameterValue(p.name(), value);
+                        task.setParameterValue(p.name(), convert(p.type(), value));
                     }
                 }
             }
@@ -129,8 +129,33 @@ public final class ReportPreview {
         }
     }
 
-    private static String describe(Throwable t) {
-        String msg = t.getMessage();
+    /**
+     * Приводит текстовое значение параметра к типу отчёта: движок BIRT
+     * не принимает строку там, где объявлено число (validateParameters
+     * возвращает false). Текст с неверным числом отдаём как есть —
+     * движок сообщит об ошибке понятнее.
+     */
+    private static Object convert(String type, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            if ("integer".equals(type)) {
+                return Integer.valueOf(value.trim());
+            }
+            if ("decimal".equals(type)) {
+                return Double.valueOf(value.trim().replace(',', '.'));
+            }
+            if ("boolean".equals(type)) {
+                return Boolean.valueOf(value.trim());
+            }
+        } catch (NumberFormatException e) {
+            return value;
+        }
+        return value;
+    }
+
+    private static String describe(Throwable t) {        String msg = t.getMessage();
         if (msg == null || msg.isEmpty()) {
             msg = t.getClass().getName();
         }

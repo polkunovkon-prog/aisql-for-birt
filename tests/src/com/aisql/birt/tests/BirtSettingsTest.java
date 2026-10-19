@@ -25,11 +25,14 @@ public final class BirtSettingsTest {
         T.eq(expectedDir.toAbsolutePath(), BirtSettings.configDir(), "каталог настроек из системного свойства");
 
         Properties defaults = BirtSettings.defaults();
-        T.eq(8, defaults.size(), "число значений по умолчанию");
+        T.eq(12, defaults.size(), "число значений по умолчанию");
         T.eq(BirtSettings.DEFAULT_BASE_URL, defaults.getProperty(BirtSettings.KEY_BASE_URL), "базовый адрес по умолчанию");
         T.eq(BirtSettings.DEFAULT_MODEL, defaults.getProperty(BirtSettings.KEY_MODEL), "модель по умолчанию");
         T.eq("", defaults.getProperty(BirtSettings.KEY_TOKEN), "ключ по умолчанию пуст");
         T.eq("true", defaults.getProperty(BirtSettings.KEY_AUDIT_ENABLED), "аудит включён по умолчанию");
+        T.eq(BirtSettings.DEFAULT_DB_DRIVER, defaults.getProperty(BirtSettings.KEY_DB_DRIVER), "драйвер базы по умолчанию");
+        T.eq(BirtSettings.DEFAULT_DB_URL, defaults.getProperty(BirtSettings.KEY_DB_URL), "адрес базы по умолчанию");
+        T.eq("", defaults.getProperty(BirtSettings.KEY_DB_PASSWORD), "пароль базы по умолчанию пуст");
 
         Path file = BirtSettings.settingsFile();
         T.check(!Files.exists(file), "до первого запуска файла нет");

@@ -1,0 +1,60 @@
+{
+  "report": {
+    "name": "students_by_house_groups",
+    "title": "Студенты по факультетам (группировка)",
+    "page": {
+      "format": "A4",
+      "orientation": "portrait",
+      "margins_mm": { "top": 10, "right": 10, "bottom": 10, "left": 15 }
+    }
+  },
+  "parameters": [
+    { "name": "min_grade", "type": "integer", "prompt": "Минимальный курс", "default": "1" }
+  ],
+  "datasources": [
+    {
+      "name": "dsHogwarts",
+      "kind": "jdbc",
+      "driver": "org.postgresql.Driver",
+      "url": "jdbc:postgresql://127.0.0.1:5432/hogwarts",
+      "user": "agent_user"
+    }
+  ],
+  "datasets": [
+    {
+      "name": "dsStudents",
+      "datasource": "dsHogwarts",
+      "sql": "select p.last_name, p.first_name, h.name as house_name, s.grade_level from students s join people p on p.id = s.person_id join houses h on h.id = s.house_id where s.grade_level >= ? order by h.name, p.last_name",
+      "params": ["min_grade"],
+      "columns": [
+        { "name": "last_name", "type": "string" },
+        { "name": "first_name", "type": "string" },
+        { "name": "house_name", "type": "string" },
+        { "name": "grade_level", "type": "integer" }
+      ]
+    }
+  ],
+  "body": [
+    {
+      "type": "label",
+      "text": "Студенты Хогвартса по факультетам",
+      "size_pt": 14,
+      "bold": true,
+      "align": "center",
+      "color": "#334455"
+    },
+    {
+      "type": "table",
+      "dataset": "dsStudents",
+      "group_by": "house_name",
+      "group_title": "Факультет",
+      "group_count": true,
+      "columns": [
+        { "header": "Фамилия", "expr": "row[\"last_name\"]", "width_mm": 45, "header_background": "#DDDDE0" },
+        { "header": "Имя", "expr": "row[\"first_name\"]", "width_mm": 35, "header_background": "#DDDDE0" },
+        { "header": "Курс", "expr": "row[\"grade_level\"]", "width_mm": 18, "align": "center", "header_background": "#DDDDE0" },
+        { "header": "Балл (курс × 10)", "expr": "row[\"grade_level\"] * 10", "width_mm": 28, "align": "right", "italic": true, "background": "#EEF2F7" }
+      ]
+    }
+  ]
+}

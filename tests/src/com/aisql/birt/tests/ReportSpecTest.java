@@ -193,7 +193,7 @@ public final class ReportSpecTest {
             "row[\\\"grade_level\\\"] ; drop"),
             "недопустимые символы");
         expectProblems(extended.replace("\"group_by\": \"house_name\"",
-            "\"group_by\": \"не_такая_колонка\""),
+            "\"group_by\": \"unknown_col\""),
             "не описана");
         expectProblems(extended.replace("row[\\\"grade_level\\\"] * 10",
             "row[\\\"нет_колонки\\\"] * 10"),

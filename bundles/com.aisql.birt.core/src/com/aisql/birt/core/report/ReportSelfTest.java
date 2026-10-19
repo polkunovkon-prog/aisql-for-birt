@@ -146,7 +146,10 @@ public final class ReportSelfTest {
         return p == null ? "" : p;
     }
 
-    /** Считает строки SEVERE во всех журналах движка в каталоге. */
+    /**
+     * Считает строки SEVERE в журналах движка (ReportEngine_*.log) каталога.
+     * Прочие *.log (например, лог самого приёмочного скрипта) не считаются.
+     */
     private static int countSevere(File dir) {
         int count = 0;
         File[] files = dir.listFiles();
@@ -154,7 +157,8 @@ public final class ReportSelfTest {
             return 0;
         }
         for (File f : files) {
-            if (!f.isFile() || !f.getName().endsWith(".log")) {
+            String name = f.getName();
+            if (!f.isFile() || !name.startsWith("ReportEngine_") || !name.endsWith(".log")) {
                 continue;
             }
             BufferedReader r = null;

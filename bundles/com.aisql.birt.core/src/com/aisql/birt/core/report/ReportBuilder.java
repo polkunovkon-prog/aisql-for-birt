@@ -162,6 +162,9 @@ public final class ReportBuilder {
      * пароль в скрытом виде; модель возвращает уже расшифрованное значение.
      * Нужен при правке отчёта, чтобы не спрашивать пароль заново.
      *
+     * <p>Ограничение BIRT 4.7: пароль с символами вне ASCII возвращается
+     * с потерей таких символов (каждый становится «?»).</p>
+     *
      * @return пароль или null, если прочитать не удалось
      */
     public static String readPassword(File designFile) {
@@ -486,6 +489,7 @@ public final class ReportBuilder {
     private static void addGroup(ElementFactory factory, TableHandle table,
             ReportSpec.Table el, String name, int columnCount) throws Exception {
         TableGroupHandle group = factory.newTableGroup();
+        group.setName(name + "_grp");
         group.setKeyExpr("row[\"" + el.groupBy() + "\"]");
         table.getGroups().add(group);
 
@@ -508,6 +512,30 @@ public final class ReportBuilder {
         group.getHeader().add(header);
 
         if (el.groupCount()) {
+            // Счётчик строк группы. В BIRT у элемента данных resultSetColumn —
+            // это имя привязки, а не выражение: «Total.count()» напрямую движок
+            // отвергает («Invalid bound column name»). Поэтому создаём у таблицы
+            // вычисляемую колонку с выражением Total.count() и привязываем
+            // элемент данных к ней.
+            String countName = name + "_gcnt";
+            int suffix = 1;
+            while (table.findColumnBinding(countName) != null) {
+                suffix++;
+                countName = name + "_gcnt" + suffix;
+            }
+            ComputedColumn countColumn = new ComputedColumn();
+            countColumn.setName(countName);
+            countColumn.setDisplayName(countName);
+            countColumn.setExpression("Total.count()");
+            // Агрегат считается по строкам группы, а не по всей таблице:
+            // без aggregateOn Total.count() возвращает число всех строк.
+            countColumn.setAggregateOn(group.getName());
+            countColumn.setDataType(DesignChoiceConstants.COLUMN_DATA_TYPE_INTEGER);
+            PropertyHandle countBindings = table.getPropertyHandle("boundDataColumns");
+            if (countBindings != null) {
+                countBindings.addItem(countColumn);
+            }
+
             RowHandle footer = factory.newTableRow(1);
             CellHandle fcell = (CellHandle) footer.getCells().get(0);
             fcell.setColumnSpan(columnCount);
@@ -515,9 +543,9 @@ public final class ReportBuilder {
             total.setText("Всего строк в группе: ");
             total.setProperty("fontFamily", FONT_FAMILY);
             fcell.getContent().add(total);
-            DataItemHandle count = factory.newDataItem(name + "_gcnt");
+            DataItemHandle count = factory.newDataItem(name + "_gcnt_item");
             count.setProperty("fontFamily", FONT_FAMILY);
-            count.setValueExpr("Total.count()");
+            count.setResultSetColumn(countName);
             fcell.getContent().add(count);
             group.getFooter().add(footer);
         }

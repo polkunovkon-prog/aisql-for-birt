@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import com.ibm.icu.util.ULocale;
 
 import org.eclipse.birt.report.model.api.CellHandle;
+import org.eclipse.birt.report.model.api.ComputedColumnHandle;
 import org.eclipse.birt.report.model.api.DataItemHandle;
 import org.eclipse.birt.report.model.api.DesignConfig;
 import org.eclipse.birt.report.model.api.DesignEngine;
@@ -65,13 +66,42 @@ public final class ReportBuilderTest {
             + "}";
     }
 
+    /** Цвет «#RRGGBB» → значение RGB, как его возвращает модель BIRT. */
+    private static Integer rgb(String hex) {
+        return Integer.valueOf(Integer.parseInt(hex.substring(1), 16));
+    }
+
+    /** Спецификация с расширениями: стили, вычисляемая колонка, группировка. */
+    private static String extendedSpecJson() {
+        return "{"
+            + " \"report\": { \"name\": \"students_ext\", \"title\": \"Расширения\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "                        \"driver\": \"org.postgresql.Driver\","
+            + "                        \"url\": \"jdbc:postgresql://127.0.0.1:5432/hogwarts\","
+            + "                        \"user\": \"agent_user\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsStudents\", \"datasource\": \"dsDB\","
+            + "                    \"sql\": \"select last_name, grade_level, house_name from students\","
+            + "                    \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"grade_level\", \"type\": \"integer\" },"
+            + "                                  { \"name\": \"house_name\", \"type\": \"string\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"label\", \"text\": \"О\", \"italic\": true, \"color\": \"#334455\" },"
+            + "   { \"type\": \"table\", \"dataset\": \"dsStudents\", \"group_by\": \"house_name\","
+            + "     \"group_title\": \"Факультет\", \"group_count\": true, \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"bold\": true,"
+            + "         \"background\": \"#EEF2F7\", \"header_background\": \"#DDDDE0\" },"
+            + "       { \"header\": \"Балл\", \"expr\": \"row[\\\"grade_level\\\"] * 10\","
+            + "         \"italic\": true, \"align\": \"right\" } ] } ]"
+            + "}";
+    }
+
     public static void run() throws Exception {
         T.section("Сборка .rptdesign из спецификации");
 
         ReportSpec spec = ReportSpec.parse(specJson());
         File dir = Files.createTempDirectory("aibirt-build").toFile();
         File target = new File(dir, spec.name() + ".rptdesign");
-        ReportBuilder.build(spec, target, "пароль-для-теста");
+        ReportBuilder.build(spec, target, "parol-dlya-testa");
 
         T.check(target.isFile(), "файл отчёта создан: " + target.getName());
         T.check(target.length() > 1000, "размер файла отчёта больше 1 КБ");
@@ -132,8 +162,78 @@ public final class ReportBuilderTest {
         }
 
         // Повторная сборка в тот же файл должна перезаписывать без ошибок.
-        ReportBuilder.build(spec, target, "пароль-для-теста");
+        ReportBuilder.build(spec, target, "parol-dlya-testa");
         T.check(target.isFile() && target.length() > 1000, "повторная сборка в тот же файл");
+
+        // --- Расширения: стили, вычисляемая колонка, группировка ---
+        ReportSpec ext = ReportSpec.parse(extendedSpecJson());
+        File extTarget = new File(dir, ext.name() + ".rptdesign");
+        ReportBuilder.build(ext, extTarget, "parol-dlya-testa");
+        T.check(extTarget.isFile(), "файл отчёта с расширениями создан");
+
+        String extXml = new String(Files.readAllBytes(extTarget.toPath()),
+            StandardCharsets.UTF_8);
+        T.check(extXml.contains("italic"), "стиль: курсив записан в файл");
+        T.check(extXml.contains("#EEF2F7"), "стиль: фон ячеек записан в файл");
+        T.check(extXml.contains("Total.count()"), "группировка: счётчик строк записан в файл");
+
+        SessionHandle extSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle design = extSession.openDesign(extTarget.getAbsolutePath());
+
+            LabelHandle extLabel = (LabelHandle) design.getBody().get(0);
+            T.eq("italic", extLabel.getProperty("fontStyle"), "надпись: курсив");
+            T.eq(rgb("#334455"), extLabel.getProperty("color"), "надпись: цвет текста");
+
+            TableHandle extTable = (TableHandle) design.getBody().get(1);
+            T.eq(1, extTable.getGroups().getCount(), "группировка: одна группа");
+            TableGroupHandle group = (TableGroupHandle) extTable.getGroups().get(0);
+            T.eq("row[\"house_name\"]", group.getKeyExpr(), "группировка: ключ группы");
+            T.eq(1, group.getHeader().getCount(), "группировка: заголовок группы");
+            RowHandle groupHeader = (RowHandle) group.getHeader().get(0);
+            CellHandle groupCell = (CellHandle) groupHeader.getCells().get(0);
+            T.eq(2, groupCell.getColumnSpan(), "заголовок группы: объединение колонок");
+            T.eq(1, group.getFooter().getCount(), "группировка: подвал со счётчиком");
+            RowHandle groupFooter = (RowHandle) group.getFooter().get(0);
+            CellHandle footerCell = (CellHandle) groupFooter.getCells().get(0);
+            DataItemHandle countItem = (DataItemHandle) footerCell.getContent().get(1);
+            String countColumn = countItem.getResultSetColumn();
+            ComputedColumnHandle countBinding = extTable.findColumnBinding(countColumn);
+            T.check(countBinding != null
+                && "Total.count()".equals(countBinding.getExpression())
+                && group.getName().equals(countBinding.getAggregateOn()),
+                "счётчик группы: вычисляемая колонка Total.count() по группе");
+
+            T.check(extTable.getPropertyHandle("boundDataColumns").getListValue().size() >= 3,
+                "привязки: колонки данных, вычисления и группировки");
+
+            RowHandle extHeader = (RowHandle) extTable.getHeader().get(0);
+            CellHandle headCell = (CellHandle) extHeader.getCells().get(0);
+            T.eq(rgb("#DDDDE0"), headCell.getProperty("backgroundColor"), "шапка: фон");
+
+            RowHandle extDetail = (RowHandle) extTable.getDetail().get(0);
+            CellHandle dataCell = (CellHandle) extDetail.getCells().get(0);
+            T.eq(rgb("#EEF2F7"), dataCell.getProperty("backgroundColor"), "ячейка данных: фон");
+            DataItemHandle dataItem = (DataItemHandle) dataCell.getContent().get(0);
+            T.eq("bold", dataItem.getProperty("fontWeight"), "ячейка данных: жирный шрифт");
+
+            CellHandle computedCell = (CellHandle) extDetail.getCells().get(1);
+            DataItemHandle computed = (DataItemHandle) computedCell.getContent().get(0);
+            String valueExpr = computed.getValueExpr();
+            String resultColumn = computed.getResultSetColumn();
+            T.check((valueExpr != null && valueExpr.contains("grade_level"))
+                || (resultColumn != null && resultColumn.contains("grade_level")),
+                "вычисляемая колонка: выражение сохранено");
+        } finally {
+            extSession.closeAll(false);
+        }
+
+        // Пароль читается из готового файла (для правки без повторного ввода).
+        T.eq("parol-dlya-testa", ReportBuilder.readPassword(target),
+            "чтение пароля из файла отчёта");
+        T.eq(null, ReportBuilder.readPassword(new File(dir, "нет-такого.rptdesign")),
+            "чтение пароля: отсутствующий файл");
 
         // Пустая спецификация не принимается.
         try {

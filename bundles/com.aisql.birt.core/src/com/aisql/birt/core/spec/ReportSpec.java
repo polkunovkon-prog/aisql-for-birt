@@ -56,7 +56,7 @@ public final class ReportSpec {
         "(?:row|dataSetRow)\\s*\\[\\s*[\"']([^\"']+)[\"']\\s*]");
     /** Простое выражение BIRT: буквы, цифры, пробелы, арифметика, row["..."]; без «;». */
     private static final Pattern SIMPLE_EXPR_RE = Pattern.compile(
-        "[A-Za-z0-9_ \"'\\[\\]()., +\\-*/%<>=!&|?:#]+");
+        "[\\p{L}\\p{N}_ \"'\\[\\]()., +\\-*/%<>=!&|?:#]+");
     /** Цвет в формате #RRGGBB. */
     private static final Pattern COLOR_RE = Pattern.compile("#[0-9A-Fa-f]{6}");
 
