@@ -37,6 +37,10 @@ public final class ReportSpec {
     public static final int MAX_BODY_ELEMENTS = 60;
     public static final int MAX_TABLE_COLUMNS = 30;
     public static final int MAX_HIGHLIGHTS = 10;
+    /** Максимум уровней вложенной группировки таблицы. */
+    public static final int MAX_GROUP_LEVELS = 5;
+    /** Максимум ключей сортировки таблицы. */
+    public static final int MAX_SORT_KEYS = 10;
     public static final int MAX_PARAMETERS = 20;
     public static final int MAX_DATASETS = 20;
     public static final int MAX_DATASOURCES = 5;
@@ -54,6 +58,9 @@ public final class ReportSpec {
     /** Функции итога (подвал таблицы). */
     public static final List<String> TOTALS = Collections.unmodifiableList(
         Arrays.asList("sum", "count", "avg", "min", "max"));
+    /** Направления сортировки. */
+    public static final List<String> SORT_DIRECTIONS = Collections.unmodifiableList(
+        Arrays.asList("asc", "desc"));
 
     private static final Pattern NAME_RE = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,59}");
     private static final Pattern COLUMN_EXPR_RE = Pattern.compile(
@@ -336,38 +343,83 @@ public final class ReportSpec {
         public List<Highlight> highlights() { return highlights; }
     }
 
+    /** Уровень группировки таблицы: колонка набора, подпись и счётчик строк. */
+    public static final class GroupLevel {
+        private final String column;
+        private final String title;
+        private final boolean count;
+
+        GroupLevel(String column, String title, boolean count) {
+            this.column = column;
+            this.title = title;
+            this.count = count;
+        }
+
+        public String column() { return column; }
+        public String title() { return title; }
+        public boolean count() { return count; }
+    }
+
+    /** Ключ сортировки: выражение row["..."] и направление asc/desc. */
+    public static final class SortKey {
+        private final String expr;
+        private final String direction;
+
+        SortKey(String expr, String direction) {
+            this.expr = expr;
+            this.direction = direction;
+        }
+
+        public String expr() { return expr; }
+        public String direction() { return direction; }
+        public boolean descending() { return "desc".equals(direction); }
+    }
+
     /** Таблица с данными. */
     public static final class Table extends BodyElement {
         private final String dataset;
         private final List<TableColumn> columns;
-        /** Колонка набора данных для группировки строк; null — без группировки. */
+        /** Колонка набора данных для группировки строк (первый уровень); null — без группировки. */
         private final String groupBy;
         /** Подпись заголовка группы (по умолчанию «Группа»). */
         private final String groupTitle;
         /** Показывать в подвале группы количество строк. */
         private final boolean groupCount;
+        /** Уровни группировки по порядку (вложенность); пусто — без группировки. */
+        private final List<GroupLevel> groups;
+        /** Ключи сортировки таблицы (по порядку применения); пусто — без сортировки. */
+        private final List<SortKey> sort;
         /** Подпись строки итогов (по умолчанию «Итого»); null — без подписи. */
         private final String totalLabel;
         /** Условие отбора строк (row["..."] ...); null — все строки. */
         private final String filter;
 
         Table(String dataset, List<TableColumn> columns,
-                String groupBy, String groupTitle, boolean groupCount, String totalLabel,
-                String filter) {
+                List<GroupLevel> groups, String totalLabel,
+                String filter, List<SortKey> sort) {
             this.dataset = dataset;
             this.columns = Collections.unmodifiableList(columns);
-            this.groupBy = groupBy;
-            this.groupTitle = groupTitle;
-            this.groupCount = groupCount;
+            this.groups = Collections.unmodifiableList(groups);
             this.totalLabel = totalLabel;
             this.filter = filter;
+            this.sort = Collections.unmodifiableList(sort);
+            GroupLevel first = groups.isEmpty() ? null : groups.get(0);
+            this.groupBy = first == null ? null : first.column();
+            this.groupTitle = first == null ? "Группа" : first.title();
+            this.groupCount = first != null && first.count();
         }
 
         public String dataset() { return dataset; }
         public List<TableColumn> columns() { return columns; }
+        /** Первый уровень группировки (совместимость с v0); null — без группировки. */
         public String groupBy() { return groupBy; }
         public String groupTitle() { return groupTitle; }
         public boolean groupCount() { return groupCount; }
+        /** Все уровни группировки по порядку (вложенность). */
+        public List<GroupLevel> groups() { return groups; }
+        public boolean hasGroups() { return !groups.isEmpty(); }
+        /** Ключи сортировки таблицы (по порядку применения). */
+        public List<SortKey> sort() { return sort; }
         public String totalLabel() { return totalLabel; }
         public String filter() { return filter; }
 
@@ -1182,7 +1234,7 @@ public final class ReportSpec {
             List<String> problems, List<DataSet> datasets) {
         checkUnknown(e, problems, "body[" + i + "]",
             "type", "dataset", "columns", "group_by", "group_title", "group_count",
-            "total_label", "filter");
+            "groups", "sort", "total_label", "filter");
         String dataset = strField(e, "dataset", true, problems, "body[" + i + "]");
         DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
         if (dataset != null && ds == null) {
@@ -1208,6 +1260,9 @@ public final class ReportSpec {
         if (groupTitle != null && groupTitle.length() > 200) {
             problems.add("body[" + i + "].group_title длиннее 200 символов");
         }
+        List<GroupLevel> groups = parseGroups(e, i, problems, ds, dataset,
+            groupBy, groupTitle, groupCount);
+        List<SortKey> sort = parseSort(e, i, problems, ds, dataset);
         String filter = strField(e, "filter", false, problems, "body[" + i + "]");
         if (filter != null) {
             if (!SIMPLE_EXPR_RE.matcher(filter).matches()) {
@@ -1384,8 +1439,159 @@ public final class ReportSpec {
         if (!hasTotal) {
             totalLabel = null;
         }
-        return new Table(dataset, cols, groupBy, groupTitle, groupCount, totalLabel,
-            filter);
+        return new Table(dataset, cols, groups, totalLabel, filter, sort);
+    }
+
+    /**
+     * Уровни группировки: старый одиночный group_by (+group_title/group_count)
+     * и новый массив groups по порядку вложенности. Формы не смешиваются.
+     */
+    private static List<GroupLevel> parseGroups(Map<String, Object> e, int i,
+            List<String> problems, DataSet ds, String dataset,
+            String groupBy, String groupTitle, boolean groupCount) {
+        String where = "body[" + i + "].groups";
+        List<GroupLevel> groups = new ArrayList<GroupLevel>();
+        Object raw = e.get("groups");
+        if (raw == null) {
+            if (groupBy != null) {
+                groups.add(new GroupLevel(groupBy,
+                    groupTitle == null ? "Группа" : groupTitle, groupCount));
+            }
+            return groups;
+        }
+        if (groupBy != null) {
+            problems.add("body[" + i + "]: group_by и groups нельзя задавать вместе");
+            return groups;
+        }
+        List<Object> list = Json.asArr(raw);
+        if (list == null) {
+            problems.add(where + " должен быть массивом уровней группировки");
+            return groups;
+        }
+        if (list.isEmpty()) {
+            problems.add(where + ": нужен хотя бы один уровень группировки");
+            return groups;
+        }
+        if (list.size() > MAX_GROUP_LEVELS) {
+            problems.add(where + ": уровней больше " + MAX_GROUP_LEVELS);
+        }
+        int k = 0;
+        for (Object o : list) {
+            k++;
+            String w = where + "[" + k + "]";
+            Map<String, Object> g = Json.asObj(o);
+            if (g == null) {
+                problems.add(w + " должен быть объектом {expr, title, count}");
+                continue;
+            }
+            checkUnknown(g, problems, w, "expr", "title", "count");
+            String expr = strField(g, "expr", true, problems, w);
+            String title = strField(g, "title", false, problems, w);
+            boolean count = Json.asBool(g.get("count"), false);
+            if (title != null && title.length() > 200) {
+                problems.add(w + ".title длиннее 200 символов");
+                title = null;
+            }
+            if (expr == null) {
+                continue;
+            }
+            String column = groupColumn(expr, w, problems);
+            if (column == null) {
+                continue;
+            }
+            if (ds != null && !ds.columns().isEmpty()
+                    && findDatasetColumn(ds, column) == null) {
+                problems.add(w + ".expr: колонка «" + column
+                    + "» не описана в datasets." + dataset + ".columns");
+            }
+            for (GroupLevel prev : groups) {
+                if (prev.column().equals(column)) {
+                    problems.add(w + ".expr: колонка «" + column
+                        + "» уже используется в другом уровне группировки");
+                }
+            }
+            groups.add(new GroupLevel(column, title == null ? "Группа" : title, count));
+        }
+        return groups;
+    }
+
+    /** Колонка из выражения группировки: row["col"] или просто имя колонки. */
+    private static String groupColumn(String expr, String where, List<String> problems) {
+        Matcher m = COLUMN_EXPR_RE.matcher(expr);
+        if (m.matches()) {
+            String col = m.group(1);
+            return matchesName(col) ? col : null;
+        }
+        if (matchesName(expr)) {
+            return expr;
+        }
+        problems.add(where + ".expr: нужно имя колонки набора или row[\"колонка\"]");
+        return null;
+    }
+
+    /** Ключи сортировки: массив или одиночный объект {expr, direction}. */
+    private static List<SortKey> parseSort(Map<String, Object> e, int i,
+            List<String> problems, DataSet ds, String dataset) {
+        String where = "body[" + i + "].sort";
+        List<SortKey> keys = new ArrayList<SortKey>();
+        Object raw = e.get("sort");
+        if (raw == null) {
+            return keys;
+        }
+        List<Object> list = Json.asArr(raw);
+        if (list == null) {
+            if (Json.asObj(raw) == null) {
+                problems.add(where + " должен быть объектом {expr, direction}"
+                    + " или массивом таких объектов");
+                return keys;
+            }
+            list = Json.arr();
+            list.add(raw);
+        }
+        if (list.isEmpty()) {
+            problems.add(where + ": пустой список ключей сортировки");
+            return keys;
+        }
+        if (list.size() > MAX_SORT_KEYS) {
+            problems.add(where + ": ключей сортировки больше " + MAX_SORT_KEYS);
+        }
+        int k = 0;
+        for (Object o : list) {
+            k++;
+            String w = list.size() == 1 && Json.asObj(raw) != null
+                ? where : where + "[" + k + "]";
+            Map<String, Object> s = Json.asObj(o);
+            if (s == null) {
+                problems.add(w + " должен быть объектом {expr, direction}");
+                continue;
+            }
+            checkUnknown(s, problems, w, "expr", "direction");
+            String expr = strField(s, "expr", true, problems, w);
+            String dir = strField(s, "direction", false, problems, w);
+            if (dir != null) {
+                dir = dir.toLowerCase(Locale.ROOT);
+                if (!SORT_DIRECTIONS.contains(dir)) {
+                    problems.add(w + ".direction «" + dir + "»: допустимы " + SORT_DIRECTIONS);
+                    dir = null;
+                }
+            }
+            if (expr == null) {
+                continue;
+            }
+            if (!SIMPLE_EXPR_RE.matcher(expr).matches() || exprRefs(expr).isEmpty()) {
+                problems.add(w + ".expr: нужно простое выражение с row[\"колонка\"]");
+                continue;
+            }
+            for (String ref : exprRefs(expr)) {
+                if (ds != null && !ds.columns().isEmpty()
+                        && findDatasetColumn(ds, ref) == null) {
+                    problems.add(w + ".expr: колонка «" + ref
+                        + "» не описана в datasets." + dataset + ".columns");
+                }
+            }
+            keys.add(new SortKey(expr, dir == null ? "asc" : dir));
+        }
+        return keys;
     }
 
     // ------------------------------------------------------------------
@@ -1694,14 +1900,41 @@ public final class ReportSpec {
                 Map<String, Object> tm = Json.obj();
                 tm.put("type", "table");
                 tm.put("dataset", t.dataset());
-                if (t.groupBy() != null) {
-                    tm.put("group_by", t.groupBy());
-                    if (!"Группа".equals(t.groupTitle())) {
-                        tm.put("group_title", t.groupTitle());
+                if (t.hasGroups()) {
+                    if (t.groups().size() == 1) {
+                        GroupLevel only = t.groups().get(0);
+                        tm.put("group_by", only.column());
+                        if (!"Группа".equals(only.title())) {
+                            tm.put("group_title", only.title());
+                        }
+                        if (only.count()) {
+                            tm.put("group_count", Boolean.TRUE);
+                        }
+                    } else {
+                        List<Object> gs = Json.arr();
+                        for (GroupLevel g : t.groups()) {
+                            Map<String, Object> gm = Json.obj();
+                            gm.put("expr", "row[\"" + g.column() + "\"]");
+                            if (!"Группа".equals(g.title())) {
+                                gm.put("title", g.title());
+                            }
+                            if (g.count()) {
+                                gm.put("count", Boolean.TRUE);
+                            }
+                            gs.add(gm);
+                        }
+                        tm.put("groups", gs);
                     }
-                    if (t.groupCount()) {
-                        tm.put("group_count", Boolean.TRUE);
+                }
+                if (!t.sort().isEmpty()) {
+                    List<Object> ss = Json.arr();
+                    for (SortKey s : t.sort()) {
+                        Map<String, Object> sm = Json.obj();
+                        sm.put("expr", s.expr());
+                        sm.put("direction", s.direction());
+                        ss.add(sm);
                     }
+                    tm.put("sort", ss);
                 }
                 if (t.totalLabel() != null && !"Итого".equals(t.totalLabel())) {
                     tm.put("total_label", t.totalLabel());
@@ -1930,9 +2163,28 @@ public final class ReportSpec {
                     }
                     sb.append(t.columns().get(j).header());
                 }
-                if (t.groupBy() != null) {
-                    sb.append("; группировка «").append(t.groupTitle())
-                        .append("» по ").append(t.groupBy());
+                if (t.hasGroups()) {
+                    sb.append("; группировка: ");
+                    for (int j = 0; j < t.groups().size(); j++) {
+                        GroupLevel g = t.groups().get(j);
+                        if (j > 0) {
+                            sb.append(" → ");
+                        }
+                        sb.append("«").append(g.title()).append("» по ").append(g.column());
+                        if (g.count()) {
+                            sb.append(" (со счётчиком)");
+                        }
+                    }
+                }
+                if (!t.sort().isEmpty()) {
+                    sb.append("; сортировка: ");
+                    for (int j = 0; j < t.sort().size(); j++) {
+                        SortKey s = t.sort().get(j);
+                        if (j > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(s.expr()).append(' ').append(s.direction());
+                    }
                 }
                 if (t.filter() != null) {
                     sb.append("; отбор строк: ").append(ellipsis(t.filter(), 40));

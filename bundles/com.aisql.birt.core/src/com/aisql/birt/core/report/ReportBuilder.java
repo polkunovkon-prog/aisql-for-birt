@@ -61,6 +61,7 @@ import org.eclipse.birt.report.model.api.elements.structures.FilterCondition;
 import org.eclipse.birt.report.model.api.elements.structures.HighlightRule;
 import org.eclipse.birt.report.model.api.elements.structures.OdaDataSetParameter;
 import org.eclipse.birt.report.model.api.elements.structures.ResultSetColumn;
+import org.eclipse.birt.report.model.api.elements.structures.SortKey;
 
 /** Собирает файл .rptdesign из спецификации отчёта. */
 public final class ReportBuilder {
@@ -660,8 +661,11 @@ public final class ReportBuilder {
         if (el.filter() != null) {
             boundNames.addAll(ReportSpec.exprRefs(el.filter()));
         }
-        if (el.groupBy() != null) {
-            boundNames.add(el.groupBy());
+        for (ReportSpec.GroupLevel g : el.groups()) {
+            boundNames.add(g.column());
+        }
+        for (ReportSpec.SortKey s : el.sort()) {
+            boundNames.addAll(ReportSpec.exprRefs(s.expr()));
         }
         if (bound != null) {
             for (String ref : boundNames) {
@@ -787,8 +791,22 @@ public final class ReportBuilder {
             }
         }
 
-        if (el.groupBy() != null) {
-            addGroup(factory, table, el, name, cols.size());
+        for (int g = 0; g < el.groups().size(); g++) {
+            addGroup(factory, table, el, el.groups().get(g), name + "_g" + (g + 1),
+                cols.size());
+        }
+        if (!el.sort().isEmpty()) {
+            PropertyHandle sortHandle = table.getPropertyHandle("sort");
+            if (sortHandle != null) {
+                for (ReportSpec.SortKey sk : el.sort()) {
+                    SortKey key = new SortKey();
+                    key.setKey(sk.expr());
+                    key.setDirection(sk.descending()
+                        ? DesignChoiceConstants.SORT_DIRECTION_DESC
+                        : DesignChoiceConstants.SORT_DIRECTION_ASC);
+                    sortHandle.addItem(key);
+                }
+            }
         }
 
         // Итоговая строка (подвал таблицы). Агрегат живёт в вычисляемой
@@ -930,10 +948,11 @@ public final class ReportBuilder {
 
     /** Группировка строк: заголовок группы со значением ключа и (опционально) счётчик. */
     private static void addGroup(ElementFactory factory, TableHandle table,
-            ReportSpec.Table el, String name, int columnCount) throws Exception {
+            ReportSpec.Table el, ReportSpec.GroupLevel level, String name,
+            int columnCount) throws Exception {
         TableGroupHandle group = factory.newTableGroup();
         group.setName(name + "_grp");
-        group.setKeyExpr("row[\"" + el.groupBy() + "\"]");
+        group.setKeyExpr("row[\"" + level.column() + "\"]");
         table.getGroups().add(group);
 
         RowHandle header = factory.newTableRow(1);
@@ -942,7 +961,7 @@ public final class ReportBuilder {
         cell.setProperty("backgroundColor", "#eef2f7");
 
         LabelHandle caption = factory.newLabel(name + "_gt");
-        caption.setText(el.groupTitle() + ": ");
+        caption.setText(level.title() + ": ");
         caption.setProperty("fontFamily", FONT_FAMILY);
         caption.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
         cell.getContent().add(caption);
@@ -950,11 +969,11 @@ public final class ReportBuilder {
         DataItemHandle key = factory.newDataItem(name + "_gk");
         key.setProperty("fontFamily", FONT_FAMILY);
         key.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
-        key.setResultSetColumn(el.groupBy());
+        key.setResultSetColumn(level.column());
         cell.getContent().add(key);
         group.getHeader().add(header);
 
-        if (el.groupCount()) {
+        if (level.count()) {
             // Счётчик строк группы. В BIRT у элемента данных resultSetColumn —
             // это имя привязки, а не выражение: «Total.count()» напрямую движок
             // отвергает («Invalid bound column name»). Поэтому создаём у таблицы

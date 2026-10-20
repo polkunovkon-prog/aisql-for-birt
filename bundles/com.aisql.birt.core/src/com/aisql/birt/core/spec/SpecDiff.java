@@ -129,16 +129,15 @@ public final class SpecDiff {
         if (!eq(a.dataset(), b.dataset())) {
             out.add(where + ": набор данных: " + a.dataset() + " → " + b.dataset());
         }
-        if (!eq(a.groupBy(), b.groupBy())) {
-            out.add(where + ": группировка: " + text(a.groupBy()) + " → " + text(b.groupBy()));
-        } else if (a.groupBy() != null) {
-            if (!eq(a.groupTitle(), b.groupTitle())) {
-                out.add(where + ": подпись группы: «" + a.groupTitle() + "» → «" + b.groupTitle() + "»");
-            }
-            if (a.groupCount() != b.groupCount()) {
-                out.add(where + ": счётчик строк в группе: "
-                    + (b.groupCount() ? "включён" : "выключен"));
-            }
+        String groupsA = groupsText(a);
+        String groupsB = groupsText(b);
+        if (!eq(groupsA, groupsB)) {
+            out.add(where + ": группировка: " + groupsA + " → " + groupsB);
+        }
+        String sortA = sortText(a);
+        String sortB = sortText(b);
+        if (!eq(sortA, sortB)) {
+            out.add(where + ": сортировка: " + sortA + " → " + sortB);
         }
         int common = Math.min(a.columns().size(), b.columns().size());
         for (int i = 0; i < common; i++) {
@@ -158,6 +157,41 @@ public final class SpecDiff {
             }
             out.add(where + ": удалены колонки: " + fmtList(removed));
         }
+    }
+
+    /** Текст уровней группировки для различий («нет» или «A по col → B по col»). */
+    private static String groupsText(ReportSpec.Table t) {
+        if (!t.hasGroups()) {
+            return "нет";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < t.groups().size(); i++) {
+            ReportSpec.GroupLevel g = t.groups().get(i);
+            if (i > 0) {
+                sb.append(" → ");
+            }
+            sb.append('«').append(g.title()).append("» по ").append(g.column());
+            if (g.count()) {
+                sb.append(" (со счётчиком)");
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Текст ключей сортировки для различий («нет» или «col asc, col2 desc»). */
+    private static String sortText(ReportSpec.Table t) {
+        if (t.sort().isEmpty()) {
+            return "нет";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < t.sort().size(); i++) {
+            ReportSpec.SortKey s = t.sort().get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(s.expr()).append(' ').append(s.direction());
+        }
+        return sb.toString();
     }
 
     private static void diffColumn(ReportSpec.TableColumn a, ReportSpec.TableColumn b,

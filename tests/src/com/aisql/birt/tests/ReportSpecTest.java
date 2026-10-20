@@ -267,6 +267,77 @@ public final class ReportSpecTest {
         expectProblems(conditions.replace(
             "\"color\": \"#B00020\", \"background\": \"#FFD5D5\", \"bold\": true",
             "\"italic\": false"), "хотя бы одно оформление");
+
+        // 10. Сортировка и многоуровневые группировки
+        String grouped = "{"
+            + " \"report\": { \"name\": \"grp\", \"title\": \"Группы\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name, house_name, grade_level from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsA\","
+            + "     \"groups\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"title\": \"Факультет\", \"count\": true },"
+            + "                 { \"expr\": \"grade_level\", \"title\": \"Курс\" } ],"
+            + "     \"sort\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"direction\": \"asc\" },"
+            + "               { \"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\" } ],"
+            + "     \"columns\": [ { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" },"
+            + "                  { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\" } ] } ]"
+            + "}";
+        ReportSpec grp = ReportSpec.parse(grouped);
+        ReportSpec.Table grpTable = (ReportSpec.Table) grp.body().get(0);
+        T.eq(2, grpTable.groups().size(), "группы: два уровня");
+        T.eq("house_name", grpTable.groups().get(0).column(), "группы: первый уровень");
+        T.eq("Факультет", grpTable.groups().get(0).title(), "группы: подпись первого уровня");
+        T.check(grpTable.groups().get(0).count(), "группы: счётчик первого уровня");
+        T.eq("grade_level", grpTable.groups().get(1).column(), "группы: второй уровень");
+        T.check(!grpTable.groups().get(1).count(), "группы: счётчик второго уровня выключен");
+        T.eq("house_name", grpTable.groupBy(), "группы: совместимость groupBy()");
+        T.eq(2, grpTable.sort().size(), "сортировка: два ключа");
+        T.eq("row[\"house_name\"]", grpTable.sort().get(0).expr(), "сортировка: первый ключ");
+        T.check(!grpTable.sort().get(0).descending(), "сортировка: первый по возрастанию");
+        T.check(grpTable.sort().get(1).descending(), "сортировка: второй по убыванию");
+        T.check(grp.summary().contains("сортировка"), "сводка: сортировка упомянута");
+        ReportSpec grpAgain = ReportSpec.parse(grp.toJson());
+        T.eq(2, ((ReportSpec.Table) grpAgain.body().get(0)).groups().size(),
+            "оборот: уровни группировки");
+        T.eq(2, ((ReportSpec.Table) grpAgain.body().get(0)).sort().size(),
+            "оборот: ключи сортировки");
+
+        // Старый одиночный group_by остаётся валидным (форма проверяется
+        // отдельной спецификацией, а не заменой подстроки: экранирование кавычек
+        // в литерале легко разойтись — так тест проверяет именно старую форму).
+        String legacy = legacySpec();
+        T.check(!legacy.equals(grouped), "старая форма group_by подготовлена");
+        ReportSpec.Table legacyTable = (ReportSpec.Table) ReportSpec.parse(legacy).body().get(0);
+        T.eq(1, legacyTable.groups().size(), "group_by строкой: один уровень");
+        T.eq("house_name", legacyTable.groupBy(), "group_by строкой: колонка");
+        T.check(legacyTable.groupCount(), "group_by строкой: счётчик");
+
+        // Сортировка одиночным объектом.
+        String singleSort = singleSortSpec();
+        T.check(!singleSort.equals(grouped), "одиночная сортировка подготовлена");
+        ReportSpec.Table singleTable = (ReportSpec.Table) ReportSpec.parse(singleSort).body().get(0);
+        T.eq(1, singleTable.sort().size(), "сортировка: одиночный объект");
+        T.check(singleTable.sort().get(0).descending(), "сортировка: направление desc");
+
+        // Ошибки сортировки и группировок.
+        expectProblems(grouped.replace("\"direction\": \"asc\"", "\"direction\": \"вверх\""),
+            "допустимы");
+        expectProblems(grouped.replace("\"direction\": \"asc\"", "\"direction\": \"asc\", \"x\": 1"),
+            "неизвестное поле");
+        expectProblems(grouped.replace("\"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\"",
+            "\"expr\": \"row[\\\"нет_колонки\\\"]\", \"direction\": \"desc\""), "не описана");
+        expectProblems(grouped.replace("\"title\": \"Курс\"", "\"title\": \"Курс\", \"стиль\": 1"),
+            "неизвестное поле");
+        expectProblems(grouped.replace("\"expr\": \"grade_level\"", "\"expr\": \"house_name\""),
+            "уже используется");
+        expectProblems(grouped.replace("\"groups\":", "\"group_by\": \"house_name\", \"groups\":"),
+            "нельзя задавать вместе");
     }
 
     /** Спецификация с таблицей: SQL, params и доп. поля колонок задаются извне. */
@@ -283,6 +354,42 @@ public final class ReportSpecTest {
             + extraColumn + " } ],"
             + " \"body\": [ { \"type\": \"table\", \"dataset\": \"dsA\", \"columns\": ["
             + "   { \"header\": \"H\", \"expr\": \"" + expr + "\" } ] } ]"
+            + "}";
+    }
+
+    /** Старая форма: один уровень через group_by строкой. */
+    private static String legacySpec() {
+        return "{"
+            + " \"report\": { \"name\": \"grp\", \"title\": \"Группы\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name, house_name from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"house_name\", \"type\": \"string\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsA\","
+            + "     \"group_by\": \"house_name\", \"group_title\": \"Факультет\", \"group_count\": true,"
+            + "     \"total_label\": \"Всего\","
+            + "     \"columns\": [ { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" } ] } ]"
+            + "}";
+    }
+
+    /** Сортировка задана одиночным объектом, а не массивом. */
+    private static String singleSortSpec() {
+        return "{"
+            + " \"report\": { \"name\": \"srt\", \"title\": \"Сортировка\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsA\","
+            + "     \"sort\": { \"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\" },"
+            + "     \"columns\": [ { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" } ] } ]"
             + "}";
     }
 

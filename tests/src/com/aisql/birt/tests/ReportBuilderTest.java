@@ -72,6 +72,19 @@ public final class ReportBuilderTest {
             + "}";
     }
 
+    private static int countOf(String text, String fragment) {
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int at = text.indexOf(fragment, from);
+            if (at < 0) {
+                return count;
+            }
+            count++;
+            from = at + fragment.length();
+        }
+    }
+
     /** Цвет «#RRGGBB» → значение RGB, как его возвращает модель BIRT. */
     private static Integer rgb(String hex) {
         return Integer.valueOf(Integer.parseInt(hex.substring(1), 16));
@@ -140,6 +153,31 @@ public final class ReportBuilderTest {
             + "           { \"type\": \"label\", \"text\": \"Итого\", \"col_span\": 2 } ] } ] },"
             + "   { \"type\": \"image\", \"base64\": \"" + png + "\","
             + "     \"width_mm\": 20, \"height_mm\": 10, \"align\": \"center\" } ]"
+            + "}";
+    }
+
+    /** Спецификация с сортировкой и двумя уровнями группировки. */
+    private static String sortGroupsSpecJson() {
+        return "{"
+            + " \"report\": { \"name\": \"sort_groups\", \"title\": \"Сортировка и группы\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "                        \"driver\": \"org.postgresql.Driver\","
+            + "                        \"url\": \"jdbc:postgresql://127.0.0.1:5432/hogwarts\","
+            + "                        \"user\": \"agent_user\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsStudents\", \"datasource\": \"dsDB\","
+            + "                    \"sql\": \"select last_name, house_name, grade_level from students\","
+            + "                    \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"table\", \"dataset\": \"dsStudents\", \"total_label\": \"Итого\","
+            + "     \"groups\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"title\": \"Факультет\", \"count\": true },"
+            + "                 { \"expr\": \"row[\\\"grade_level\\\"]\", \"title\": \"Курс\" } ],"
+            + "     \"sort\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"direction\": \"asc\" },"
+            + "               { \"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\" } ],"
+            + "     \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" },"
+            + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\", \"total\": \"count\" } ] } ]"
             + "}";
     }
 
@@ -398,6 +436,74 @@ public final class ReportBuilderTest {
                 "изображение: высота 10 мм");
         } finally {
             giSession.closeAll(false);
+        }
+
+        // --- Сортировка и две группы ---
+        ReportSpec sg = ReportSpec.parse(sortGroupsSpecJson());
+        File sgTarget = new File(dir, sg.name() + ".rptdesign");
+        ReportBuilder.build(sg, sgTarget, "parol-dlya-testa");
+        T.check(sgTarget.isFile(), "файл отчёта с сортировкой и группами создан");
+
+        String sgXml = new String(Files.readAllBytes(sgTarget.toPath()),
+            StandardCharsets.UTF_8);
+        T.check(sgXml.contains("name=\"sort\"") && sgXml.contains("<expression name=\"key\">"),
+            "сортировка: ключи записаны в файл");
+        T.check(sgXml.contains("<property name=\"direction\">desc</property>"),
+            "сортировка: направление desc в файле");
+        T.eq(2, countOf(sgXml, "<property name=\"groupName\">"),
+            "группировка: два уровня записаны в файл");
+
+        SessionHandle sgSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle design = sgSession.openDesign(sgTarget.getAbsolutePath());
+            TableHandle table = (TableHandle) design.getBody().get(0);
+
+            // Сортировка: Design API читает ключи и направления.
+            java.util.List<?> sortKeys =
+                table.getPropertyHandle("sort").getListValue();
+            T.eq(2, sortKeys.size(), "сортировка: два ключа в модели");
+            // getListValue() возвращает структуры SortKey (не handle-обёртки).
+            org.eclipse.birt.report.model.api.elements.structures.SortKey first =
+                (org.eclipse.birt.report.model.api.elements.structures.SortKey) sortKeys.get(0);
+            org.eclipse.birt.report.model.api.elements.structures.SortKey second =
+                (org.eclipse.birt.report.model.api.elements.structures.SortKey) sortKeys.get(1);
+            T.eq("row[\"house_name\"]", first.getKey(), "сортировка: первый ключ");
+            T.eq("asc", first.getDirection(), "сортировка: первый по возрастанию");
+            T.eq("row[\"last_name\"]", second.getKey(), "сортировка: второй ключ");
+            T.eq("desc", second.getDirection(), "сортировка: второй по убыванию");
+
+            // Две группы: порядок вложенности, ключи, заголовки.
+            T.eq(2, table.getGroups().getCount(), "группировка: две группы");
+            TableGroupHandle g1 = (TableGroupHandle) table.getGroups().get(0);
+            TableGroupHandle g2 = (TableGroupHandle) table.getGroups().get(1);
+            T.eq("row[\"house_name\"]", g1.getKeyExpr(), "группа 1: ключ");
+            T.eq("row[\"grade_level\"]", g2.getKeyExpr(), "группа 2: ключ");
+            T.check(g1.getKeyExpr() != null && g2.getKeyExpr() != null
+                && g1.getKeyExpr().contains("house_name")
+                && g2.getKeyExpr().contains("grade_level"),
+                "группировка: порядок уровней (снаружи факультет, внутри курс)");
+
+            T.eq(1, g1.getHeader().getCount(), "группа 1: заголовок");
+            RowHandle h1 = (RowHandle) g1.getHeader().get(0);
+            CellHandle c1 = (CellHandle) h1.getCells().get(0);
+            LabelHandle title1 = (LabelHandle) c1.getContent().get(0);
+            T.check(title1.getText() != null && title1.getText().contains("Факультет"),
+                "группа 1: подпись заголовка «Факультет», получено: " + title1.getText());
+
+            T.eq(1, g2.getHeader().getCount(), "группа 2: заголовок");
+            RowHandle h2 = (RowHandle) g2.getHeader().get(0);
+            CellHandle c2 = (CellHandle) h2.getCells().get(0);
+            LabelHandle title2 = (LabelHandle) c2.getContent().get(0);
+            T.check(title2.getText() != null && title2.getText().contains("Курс"),
+                "группа 2: подпись заголовка «Курс», получено: " + title2.getText());
+
+            T.eq(1, g1.getFooter().getCount(), "группа 1: подвал со счётчиком");
+            T.eq(0, g2.getFooter().getCount(), "группа 2: подвала нет (счётчик выключен)");
+
+            T.eq(1, table.getFooter().getCount(), "итоги: подвал таблицы при группах");
+        } finally {
+            sgSession.closeAll(false);
         }
 
         // Пустая спецификация не принимается.

@@ -33,6 +33,7 @@ else
         "$ROOT/tests/samples/students-by-house.spec.json"
         "$ROOT/tests/samples/students-by-house-groups.spec.json"
         "$ROOT/tests/samples/students-conditions.spec.json"
+        "$ROOT/tests/samples/students-sort-groups.spec.json"
     )
 fi
 

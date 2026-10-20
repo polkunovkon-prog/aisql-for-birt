@@ -1,0 +1,25 @@
+{
+  "report": { "name": "students_sort_groups", "title": "Студенты: факультет и курс" },
+  "datasources": [
+    { "name": "dsDB", "kind": "jdbc", "driver": "org.postgresql.Driver",
+      "url": "jdbc:postgresql://127.0.0.1:5432/hogwarts", "user": "agent_user" }
+  ],
+  "datasets": [
+    { "name": "dsStudents", "datasource": "dsDB",
+      "sql": "select p.last_name, h.name as house_name, s.grade_level from students s join people p on p.id = s.person_id join houses h on h.id = s.house_id where s.is_active",
+      "columns": [ { "name": "last_name", "type": "string" },
+                   { "name": "house_name", "type": "string" },
+                   { "name": "grade_level", "type": "integer" } ] }
+  ],
+  "body": [
+    { "type": "label", "text": "Студенты по факультетам и курсам", "size_pt": 14, "bold": true, "align": "center" },
+    { "type": "table", "dataset": "dsStudents", "total_label": "Всего студентов",
+      "groups": [ { "expr": "row[\"house_name\"]", "title": "Факультет", "count": true },
+                  { "expr": "row[\"grade_level\"]", "title": "Курс", "count": true } ],
+      "sort": [ { "expr": "row[\"house_name\"]", "direction": "asc" },
+                { "expr": "row[\"grade_level\"]", "direction": "asc" },
+                { "expr": "row[\"last_name\"]", "direction": "asc" } ],
+      "columns": [ { "header": "Фамилия", "expr": "row[\"last_name\"]" },
+                   { "header": "Курс", "expr": "row[\"grade_level\"]", "align": "center" } ] }
+  ]
+}
