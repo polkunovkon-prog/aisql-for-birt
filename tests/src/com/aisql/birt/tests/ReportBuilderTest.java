@@ -23,11 +23,13 @@ import com.ibm.icu.util.ULocale;
 
 import org.eclipse.birt.report.model.api.AggregationArgumentHandle;
 import org.eclipse.birt.report.model.api.CellHandle;
+import org.eclipse.birt.report.model.api.ColumnHandle;
 import org.eclipse.birt.report.model.api.ComputedColumnHandle;
 import org.eclipse.birt.report.model.api.DataItemHandle;
 import org.eclipse.birt.report.model.api.DesignConfig;
 import org.eclipse.birt.report.model.api.DesignEngine;
 import org.eclipse.birt.report.model.api.GridHandle;
+import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
 import org.eclipse.birt.report.model.api.MasterPageHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
@@ -120,6 +122,24 @@ public final class ReportBuilderTest {
             + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\","
             + "         \"highlight\": [ { \"when\": \"row[\\\"grade_level\\\"] < 3\","
             + "                           \"background\": \"#FFD5D5\", \"bold\": true } ] } ] } ]"
+            + "}";
+    }
+
+    /** Спецификация с grid (ширины колонок, спаны) и встроенным изображением. */
+    private static String gridImageSpecJson() {
+        String png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            + "+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        return "{"
+            + " \"report\": { \"name\": \"grid_image\", \"title\": \"Сетка и картинка\" },"
+            + " \"body\": ["
+            + "   { \"type\": \"grid\", \"column_widths_mm\": [ 40, 60 ], \"rows\": ["
+            + "       { \"cells\": ["
+            + "           { \"type\": \"label\", \"text\": \"Слева\", \"bold\": true },"
+            + "           { \"type\": \"label\", \"text\": \"Справа\", \"align\": \"center\" } ] },"
+            + "       { \"cells\": ["
+            + "           { \"type\": \"label\", \"text\": \"Итого\", \"col_span\": 2 } ] } ] },"
+            + "   { \"type\": \"image\", \"base64\": \"" + png + "\","
+            + "     \"width_mm\": 20, \"height_mm\": 10, \"align\": \"center\" } ]"
             + "}";
     }
 
@@ -333,6 +353,51 @@ public final class ReportBuilderTest {
                 "условие: правило оформления на элементе данных");
         } finally {
             condSession.closeAll(false);
+        }
+
+        // --- Grid и встроенное изображение ---
+        ReportSpec gi = ReportSpec.parse(gridImageSpecJson());
+        File giTarget = new File(dir, gi.name() + ".rptdesign");
+        ReportBuilder.build(gi, giTarget, "");
+        T.check(giTarget.isFile(), "файл отчёта с grid и изображением создан");
+
+        SessionHandle giSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle design = giSession.openDesign(giTarget.getAbsolutePath());
+            T.eq(2, design.getBody().getCount(), "grid и изображение в теле отчёта");
+
+            GridHandle grid = (GridHandle) design.getBody().get(0);
+            T.eq(2, grid.getColumnCount(), "grid: две колонки");
+            T.eq(2, grid.getRows().getCount(), "grid: две строки");
+            ColumnHandle firstColumn = (ColumnHandle) grid.getColumns().get(0);
+            ColumnHandle secondColumn = (ColumnHandle) grid.getColumns().get(1);
+            T.eq(Double.valueOf(40.0), Double.valueOf(firstColumn.getWidth().getMeasure()),
+                "grid: ширина первой колонки 40 мм");
+            T.eq(Double.valueOf(60.0), Double.valueOf(secondColumn.getWidth().getMeasure()),
+                "grid: ширина второй колонки 60 мм");
+
+            RowHandle firstRow = (RowHandle) grid.getRows().get(0);
+            CellHandle left = (CellHandle) firstRow.getCells().get(0);
+            LabelHandle leftLabel = (LabelHandle) left.getContent().get(0);
+            T.eq("Слева", leftLabel.getText(), "grid: текст первой ячейки");
+            T.eq("bold", leftLabel.getProperty("fontWeight"), "grid: жирный шрифт ячейки");
+
+            RowHandle secondRow = (RowHandle) grid.getRows().get(1);
+            CellHandle summary = (CellHandle) secondRow.getCells().get(0);
+            T.eq(2, summary.getColumnSpan(), "grid: объединение двух колонок");
+
+            ImageHandle image = (ImageHandle) design.getBody().get(1);
+            T.check(image.getEmbeddedImage() != null
+                && image.getEmbeddedImage().getData() != null
+                && image.getEmbeddedImage().getData().length > 0,
+                "изображение: PNG встроен в отчёт");
+            T.eq(Double.valueOf(20.0), Double.valueOf(image.getWidth().getMeasure()),
+                "изображение: ширина 20 мм");
+            T.eq(Double.valueOf(10.0), Double.valueOf(image.getHeight().getMeasure()),
+                "изображение: высота 10 мм");
+        } finally {
+            giSession.closeAll(false);
         }
 
         // Пустая спецификация не принимается.

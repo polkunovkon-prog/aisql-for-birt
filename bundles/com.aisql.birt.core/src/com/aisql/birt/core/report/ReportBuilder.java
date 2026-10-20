@@ -36,6 +36,7 @@ import org.eclipse.birt.report.model.api.ElementFactory;
 import org.eclipse.birt.report.model.api.Expression;
 import org.eclipse.birt.report.model.api.ExpressionType;
 import org.eclipse.birt.report.model.api.GridHandle;
+import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
 import org.eclipse.birt.report.model.api.OdaDataSourceHandle;
@@ -55,6 +56,7 @@ import org.eclipse.birt.report.model.api.elements.structures.AggregationArgument
 import org.eclipse.birt.report.model.api.elements.structures.CachedMetaData;
 import org.eclipse.birt.report.model.api.elements.structures.ColumnHint;
 import org.eclipse.birt.report.model.api.elements.structures.ComputedColumn;
+import org.eclipse.birt.report.model.api.elements.structures.EmbeddedImage;
 import org.eclipse.birt.report.model.api.elements.structures.FilterCondition;
 import org.eclipse.birt.report.model.api.elements.structures.HighlightRule;
 import org.eclipse.birt.report.model.api.elements.structures.OdaDataSetParameter;
@@ -469,6 +471,8 @@ public final class ReportBuilder {
             ReportSpec spec) throws Exception {
         int labelIndex = 0;
         int tableIndex = 0;
+        int gridIndex = 0;
+        int imageIndex = 0;
         for (ReportSpec.BodyElement el : spec.body()) {
             if (el instanceof ReportSpec.Label) {
                 labelIndex++;
@@ -478,8 +482,126 @@ public final class ReportBuilder {
                 tableIndex++;
                 design.getBody().add(createTable(design, factory, spec,
                     (ReportSpec.Table) el, "table_" + tableIndex));
+            } else if (el instanceof ReportSpec.Grid) {
+                gridIndex++;
+                design.getBody().add(createGrid(factory, (ReportSpec.Grid) el,
+                    "grid_" + gridIndex));
+            } else if (el instanceof ReportSpec.Image) {
+                imageIndex++;
+                design.getBody().add(createImage(design, factory, (ReportSpec.Image) el,
+                    "image_" + imageIndex));
             }
         }
+    }
+
+    /** Сетка grid: строки ячеек со спанами. */
+    private static GridHandle createGrid(ElementFactory factory, ReportSpec.Grid el, String name)
+            throws Exception {
+        List<Double> widths = el.columnWidthsMm();
+        int cols = widths.size();
+        GridHandle grid = factory.newGridItem(name, cols, el.rows().size());
+        for (int c = 0; c < cols; c++) {
+            ColumnHandle column = (ColumnHandle) grid.getColumns().get(c);
+            column.getWidth().setAbsolute(widths.get(c).doubleValue());
+        }
+        for (int r = 0; r < el.rows().size(); r++) {
+            RowHandle row = (RowHandle) grid.getRows().get(r);
+            List<ReportSpec.Cell> cells = el.rows().get(r);
+            // A spanning cell covers several grid columns; newGridItem created a
+            // full set of cells, so drop the covered placeholders from the end.
+            for (int c = row.getCells().getCount() - 1; c >= cells.size(); c--) {
+                row.getCells().drop(c);
+            }
+            for (int c = 0; c < cells.size(); c++) {
+                ReportSpec.Cell cell = cells.get(c);
+                CellHandle hc = (CellHandle) row.getCells().get(c);
+                if (cell.colSpan() != null && cell.colSpan() > 1) {
+                    hc.setColumnSpan(cell.colSpan());
+                }
+                if (cell.rowSpan() != null && cell.rowSpan() > 1) {
+                    hc.setRowSpan(cell.rowSpan());
+                }
+                if (cell.background() != null) {
+                    hc.setProperty("backgroundColor", cell.background());
+                }
+                addCellContent(factory, hc, cell, name + "_r" + (r + 1) + "_c" + (c + 1));
+            }
+        }
+        return grid;
+    }
+
+    /** Кладёт содержимое в ячейку grid (надпись/поле/HTML-текст). */
+    private static void addCellContent(ElementFactory factory, CellHandle hc,
+            ReportSpec.Cell cell, String name) throws Exception {
+        if ("data".equals(cell.type())) {
+            DataItemHandle item = factory.newDataItem(name + "_data");
+            item.setProperty("fontFamily", FONT_FAMILY);
+            if (cell.align() != null) {
+                item.setProperty("textAlign", cell.align());
+            }
+            item.setResultSetColumn(cell.expr());
+            hc.getContent().add(item);
+        } else if ("text".equals(cell.type())) {
+            TextItemHandle item = factory.newTextItem(name + "_text");
+            item.setContentType(DesignChoiceConstants.TEXT_CONTENT_TYPE_HTML);
+            item.setContent("<value-of>" + cell.expr() + "</value-of>");
+            item.setProperty("fontFamily", FONT_FAMILY);
+            hc.getContent().add(item);
+        } else {
+            LabelHandle label = factory.newLabel(name + "_lbl");
+            label.setText(cell.text() == null ? "" : cell.text());
+            label.setProperty("fontFamily", FONT_FAMILY);
+            if (cell.fontPt() != null) {
+                label.setProperty("fontSize", fmtMm(cell.fontPt()) + "pt");
+            }
+            if (cell.bold()) {
+                label.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+            }
+            if (cell.italic()) {
+                label.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+            }
+            if (cell.color() != null) {
+                label.setProperty("color", cell.color());
+            }
+            if (cell.align() != null) {
+                label.setProperty("textAlign", cell.align());
+            }
+            hc.getContent().add(label);
+        }
+    }
+
+    /** Изображение: встроенный PNG (base64) или импорт из файла. */
+    private static ImageHandle createImage(ReportDesignHandle design,
+            ElementFactory factory, ReportSpec.Image el, String name)
+            throws Exception {
+        ImageHandle handle = factory.newImage(name);
+        byte[] png;
+        if (el.base64Png() != null) {
+            png = java.util.Base64.getDecoder().decode(el.base64Png());
+        } else {
+            File f = new File(el.path());
+            if (!f.isFile()) {
+                throw new ReportBuildException(
+                    "изображение: файл не найден — " + f.getAbsolutePath());
+            }
+            png = java.nio.file.Files.readAllBytes(f.toPath());
+        }
+        // Embedded images are design-level structures; the image item refers to
+        // one by name. handle.getEmbeddedImage() is null until that link exists.
+        EmbeddedImage image = StructureFactory.createEmbeddedImage();
+        image.setName(name + ".png");
+        image.setType(DesignChoiceConstants.IMAGE_TYPE_IMAGE_PNG);
+        image.setData(png);
+        design.addImage(image);
+        handle.setSource(DesignChoiceConstants.IMAGE_REF_TYPE_EMBED);
+        handle.setImageName(name + ".png");
+        if (el.widthMm() != null) {
+            handle.setWidth(String.valueOf(el.widthMm()) + "mm");
+        }
+        if (el.heightMm() != null) {
+            handle.setHeight(String.valueOf(el.heightMm()) + "mm");
+        }
+        return handle;
     }
 
     private static LabelHandle createLabel(ElementFactory factory, ReportSpec.Label el, String name)

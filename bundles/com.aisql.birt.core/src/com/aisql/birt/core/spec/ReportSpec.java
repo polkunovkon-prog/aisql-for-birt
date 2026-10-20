@@ -374,6 +374,93 @@ public final class ReportSpec {
         @Override public String type() { return "table"; }
     }
 
+    /** Ячейка grid/таблицы: надпись, поле данных или HTML-текст. */
+    public static final class Cell {
+        private final String type;
+        private final String text;
+        private final String expr;
+        private final String dataset;
+        private final String align;
+        private final String background;
+        private final String color;
+        private final boolean bold;
+        private final boolean italic;
+        private final Double fontPt;
+        private final Integer colSpan;
+        private final Integer rowSpan;
+
+        Cell(String type, String text, String expr, String dataset, String align,
+                String background, String color, boolean bold, boolean italic,
+                Double fontPt, Integer colSpan, Integer rowSpan) {
+            this.type = type;
+            this.text = text;
+            this.expr = expr;
+            this.dataset = dataset;
+            this.align = align;
+            this.background = background;
+            this.color = color;
+            this.bold = bold;
+            this.italic = italic;
+            this.fontPt = fontPt;
+            this.colSpan = colSpan;
+            this.rowSpan = rowSpan;
+        }
+
+        public String type() { return type; }
+        public String text() { return text; }
+        public String expr() { return expr; }
+        public String dataset() { return dataset; }
+        public String align() { return align; }
+        public String background() { return background; }
+        public String color() { return color; }
+        public boolean bold() { return bold; }
+        public boolean italic() { return italic; }
+        public Double fontPt() { return fontPt; }
+        public Integer colSpan() { return colSpan; }
+        public Integer rowSpan() { return rowSpan; }
+    }
+
+    /** Сетка (grid) — бланковая вёрстка: строки ячеек со спанами. */
+    public static final class Grid extends BodyElement {
+        private final List<Double> columnWidthsMm;
+        private final List<List<Cell>> rows;
+
+        Grid(List<Double> columnWidthsMm, List<List<Cell>> rows) {
+            this.columnWidthsMm = Collections.unmodifiableList(columnWidthsMm);
+            this.rows = Collections.unmodifiableList(rows);
+        }
+
+        public List<Double> columnWidthsMm() { return columnWidthsMm; }
+        public List<List<Cell>> rows() { return rows; }
+
+        @Override public String type() { return "grid"; }
+    }
+
+    /** Изображение (встроенный PNG в base64 или путь к файлу). */
+    public static final class Image extends BodyElement {
+        private final String base64Png;
+        private final String path;
+        private final Double widthMm;
+        private final Double heightMm;
+        private final String align;
+
+        Image(String base64Png, String path, Double widthMm, Double heightMm, String align) {
+            this.base64Png = base64Png;
+            this.path = path;
+            this.widthMm = widthMm;
+            this.heightMm = heightMm;
+            this.align = align;
+        }
+
+        public String base64Png() { return base64Png; }
+        public String path() { return path; }
+        public Double widthMm() { return widthMm; }
+        public Double heightMm() { return heightMm; }
+        public String align() { return align; }
+
+        @Override public String type() { return "image"; }
+    }
+
     // ------------------------------------------------------------------
     // Экземпляр
     // ------------------------------------------------------------------
@@ -744,9 +831,19 @@ public final class ReportSpec {
                     if (el != null) {
                         body.add(el);
                     }
+                } else if ("grid".equals(type)) {
+                    BodyElement el = parseGrid(e, i, problems, datasets);
+                    if (el != null) {
+                        body.add(el);
+                    }
+                } else if ("image".equals(type)) {
+                    BodyElement el = parseImage(e, i, problems);
+                    if (el != null) {
+                        body.add(el);
+                    }
                 } else {
                     problems.add("body[" + i + "].type «" + type
-                        + "»: на этом этапе поддерживаются «label» и «table»");
+                        + "»: на этом этапе поддерживаются «label», «table», «grid» и «image»");
                 }
             }
         }
@@ -862,6 +959,223 @@ public final class ReportSpec {
             return null;
         }
         return new Label(text, size, bold, italic, color, align);
+    }
+
+    /** Разбор grid: column_widths_mm + rows[].cells[]. */
+    private static BodyElement parseGrid(Map<String, Object> e, int i,
+            List<String> problems, List<DataSet> datasets) {
+        checkUnknown(e, problems, "body[" + i + "]",
+            "type", "column_widths_mm", "rows");
+        List<Object> widthsRaw = arrField(e, "column_widths_mm", problems, "body[" + i + "]");
+        if (widthsRaw == null || widthsRaw.isEmpty()) {
+            problems.add("body[" + i + "] («grid»): нужен непустой список column_widths_mm");
+        } else if (widthsRaw.size() > MAX_TABLE_COLUMNS) {
+            problems.add("body[" + i + "]: колонок grid больше " + MAX_TABLE_COLUMNS);
+        }
+        List<Double> widths = new ArrayList<Double>();
+        if (widthsRaw != null) {
+            for (Object w : widthsRaw) {
+                if (!(w instanceof Number)) {
+                    problems.add("body[" + i + "].column_widths_mm должен быть массивом чисел (мм)");
+                    continue;
+                }
+                double d = ((Number) w).doubleValue();
+                if (d < 5 || d > 300) {
+                    problems.add("body[" + i + "].column_widths_mm: допустимо 5–300 мм");
+                    continue;
+                }
+                widths.add(Double.valueOf(d));
+            }
+        }
+        List<Object> rowsRaw = arrField(e, "rows", problems, "body[" + i + "]");
+        if (rowsRaw == null || rowsRaw.isEmpty()) {
+            problems.add("body[" + i + "] («grid»): нужен непустой список rows");
+        } else if (rowsRaw.size() > MAX_BODY_ELEMENTS) {
+            problems.add("body[" + i + "]: строк grid больше " + MAX_BODY_ELEMENTS);
+        }
+        List<List<Cell>> rows = new ArrayList<List<Cell>>();
+        if (rowsRaw != null) {
+            int r = 0;
+            for (Object ro : rowsRaw) {
+                r++;
+                Map<String, Object> row = Json.asObj(ro);
+                if (row == null) {
+                    problems.add("body[" + i + "].rows[" + r + "] должен быть объектом");
+                    continue;
+                }
+                checkUnknown(row, problems, "body[" + i + "].rows[" + r + "]",
+                    "cells");
+                List<Object> cellsRaw = arrField(row, "cells", problems,
+                    "body[" + i + "].rows[" + r + "]");
+                if (cellsRaw == null || cellsRaw.isEmpty()) {
+                    problems.add("body[" + i + "].rows[" + r + "]: нужен непустой список cells");
+                    continue;
+                }
+                if (cellsRaw.size() > MAX_TABLE_COLUMNS) {
+                    problems.add("body[" + i + "].rows[" + r
+                        + "]: ячеек больше " + MAX_TABLE_COLUMNS);
+                }
+                List<Cell> cells = new ArrayList<Cell>();
+                int c = 0;
+                for (Object co : cellsRaw) {
+                    c++;
+                    String cw = "body[" + i + "].rows[" + r + "].cells[" + c + "]";
+                    Map<String, Object> cell = Json.asObj(co);
+                    if (cell == null) {
+                        problems.add(cw + " должен быть объектом");
+                        continue;
+                    }
+                    Cell parsed = parseCell(cell, cw, problems, datasets);
+                    if (parsed != null) {
+                        cells.add(parsed);
+                    }
+                }
+                if (widths != null && !widths.isEmpty()) {
+                    int spanSum = 0;
+                    for (Cell cell : cells) {
+                        spanSum += cell.colSpan() == null ? 1 : cell.colSpan().intValue();
+                    }
+                    if (spanSum != widths.size()) {
+                        problems.add("body[" + i + "].rows[" + r
+                            + "]: сумма col_span ячеек (" + spanSum
+                            + ") не совпадает с числом колонок (" + widths.size() + ")");
+                    }
+                }
+                rows.add(cells);
+            }
+        }
+        if (widths == null || widths.isEmpty() || rows == null || rows.isEmpty()) {
+            return null;
+        }
+        return new Grid(widths, rows);
+    }
+
+    /** Разбор ячейки grid: {type, text, expr, dataset, ...}. */
+    private static Cell parseCell(Map<String, Object> c, String where,
+            List<String> problems, List<DataSet> datasets) {
+        checkUnknown(c, problems, where,
+            "type", "text", "expr", "dataset", "align", "background",
+            "color", "bold", "italic", "font_pt", "col_span", "row_span");
+        String type = strField(c, "type", false, problems, where);
+        if (type != null && !"label".equals(type) && !"data".equals(type)
+                && !"text".equals(type)) {
+            problems.add(where + ".type «" + type + "»: допустимы «label», «data», «text»");
+            type = null;
+        }
+        String text = strField(c, "text", false, problems, where);
+        String expr = strField(c, "expr", false, problems, where);
+        String dataset = strField(c, "dataset", false, problems, where);
+        if (expr != null) {
+            if (dataset != null && findDataSet(datasets, dataset) == null) {
+                problems.add(where + ".dataset «" + dataset + "»: набор данных не описан");
+            }
+            if (!SIMPLE_EXPR_RE.matcher(expr).matches()) {
+                problems.add(where + ".expr: недопустимые символы — нужно простое "
+                    + "выражение BIRT (арифметика и row[\"колонка\"], без «;»)");
+                expr = null;
+            }
+        }
+        String align = strField(c, "align", false, problems, where);
+        if (align != null && !ALIGNS.contains(align)) {
+            problems.add(where + ".align «" + align + "»: допустимы " + ALIGNS);
+            align = null;
+        }
+        Double font = null;
+        Object fRaw = c.get("font_pt");
+        if (fRaw != null) {
+            if (!(fRaw instanceof Number)) {
+                problems.add(where + ".font_pt должен быть числом");
+            } else {
+                double d = ((Number) fRaw).doubleValue();
+                if (d < 6 || d > 72) {
+                    problems.add(where + ".font_pt: допустимо 6–72");
+                } else {
+                    font = Double.valueOf(d);
+                }
+            }
+        }
+        Integer colSpan = intField(c, "col_span", where, problems, 1, 10);
+        Integer rowSpan = intField(c, "row_span", where, problems, 1, 50);
+        return new Cell(type == null ? "label" : type, text, expr, dataset, align,
+            colorField(c, "background", problems, where), colorField(c, "color", problems, where),
+            Json.asBool(c.get("bold"), false), Json.asBool(c.get("italic"), false),
+            font, colSpan, rowSpan);
+    }
+
+    /** Разбор image: {base64, path, width_mm, height_mm, align}. */
+    private static BodyElement parseImage(Map<String, Object> e, int i, List<String> problems) {
+        checkUnknown(e, problems, "body[" + i + "]",
+            "type", "base64", "path", "width_mm", "height_mm", "align");
+        String base64 = strField(e, "base64", false, problems, "body[" + i + "]");
+        String path = strField(e, "path", false, problems, "body[" + i + "]");
+        if (base64 == null && path == null) {
+            problems.add("body[" + i + "] («image»): нужен base64 или path");
+        }
+        if (base64 != null && path != null) {
+            problems.add("body[" + i + "] («image»): base64 и path нельзя задавать вместе");
+        }
+        if (base64 != null && !base64.matches("^[A-Za-z0-9+/=]{64,}$")) {
+            problems.add("body[" + i + "].base64: ожидаются данные PNG в base64 (минимум 1 КБ)");
+        }
+        Double width = null;
+        Object wRaw = e.get("width_mm");
+        if (wRaw != null) {
+            if (!(wRaw instanceof Number)) {
+                problems.add("body[" + i + "].width_mm должен быть числом");
+            } else {
+                double d = ((Number) wRaw).doubleValue();
+                if (d < 5 || d > 300) {
+                    problems.add("body[" + i + "].width_mm: допустимо 5–300 мм");
+                } else {
+                    width = Double.valueOf(d);
+                }
+            }
+        }
+        Double height = null;
+        Object hRaw = e.get("height_mm");
+        if (hRaw != null) {
+            if (!(hRaw instanceof Number)) {
+                problems.add("body[" + i + "].height_mm должен быть числом");
+            } else {
+                double d = ((Number) hRaw).doubleValue();
+                if (d < 5 || d > 300) {
+                    problems.add("body[" + i + "].height_mm: допустимо 5–300 мм");
+                } else {
+                    height = Double.valueOf(d);
+                }
+            }
+        }
+        String align = strField(e, "align", false, problems, "body[" + i + "]");
+        if (align != null && !ALIGNS.contains(align)) {
+            problems.add("body[" + i + "].align «" + align + "»: допустимы " + ALIGNS);
+            align = null;
+        }
+        if (width == null && height == null) {
+            problems.add("body[" + i + "] («image»): нужна ширина или высота в мм");
+        }
+        if (base64 == null && path == null) {
+            return null;
+        }
+        return new Image(base64, path, width, height, align);
+    }
+
+    /** Целое поле с проверкой диапазона. */
+    private static Integer intField(Map<String, Object> map, String key, String where,
+            List<String> problems, int min, int max) {
+        Object o = map.get(key);
+        if (o == null) {
+            return null;
+        }
+        if (!(o instanceof Number)) {
+            problems.add(where + "." + key + " должен быть числом");
+            return null;
+        }
+        int v = ((Number) o).intValue();
+        if (v < min || v > max) {
+            problems.add(where + "." + key + ": допустимо " + min + "–" + max);
+            return null;
+        }
+        return Integer.valueOf(v);
     }
 
     private static BodyElement parseTable(Map<String, Object> e, int i,
@@ -1452,10 +1766,87 @@ public final class ReportSpec {
                 }
                 tm.put("columns", cs);
                 bs.add(tm);
+            } else if (el instanceof Grid) {
+                Grid g = (Grid) el;
+                Map<String, Object> gm = Json.obj();
+                gm.put("type", "grid");
+                List<Object> w = Json.arr();
+                for (Double d : g.columnWidthsMm()) {
+                    w.add(d);
+                }
+                gm.put("column_widths_mm", w);
+                List<Object> rs = Json.arr();
+                for (List<Cell> row : g.rows()) {
+                    Map<String, Object> rm = Json.obj();
+                    List<Object> cs = Json.arr();
+                    for (Cell cell : row) {
+                        cs.add(cellToJson(cell));
+                    }
+                    rm.put("cells", cs);
+                    rs.add(rm);
+                }
+                gm.put("rows", rs);
+                bs.add(gm);
+            } else if (el instanceof Image) {
+                Image im = (Image) el;
+                Map<String, Object> im2 = Json.obj();
+                im2.put("type", "image");
+                if (im.base64Png() != null) {
+                    im2.put("base64", im.base64Png());
+                } else {
+                    im2.put("path", im.path());
+                }
+                if (im.widthMm() != null) {
+                    im2.put("width_mm", im.widthMm());
+                }
+                if (im.heightMm() != null) {
+                    im2.put("height_mm", im.heightMm());
+                }
+                bs.add(im2);
             }
         }
         root.put("body", bs);
         return Json.write(root);
+    }
+
+    /** Превращает ячейку grid в карту для канонического JSON. */
+    private static Map<String, Object> cellToJson(Cell cell) {
+        Map<String, Object> m = Json.obj();
+        if (!"label".equals(cell.type())) {
+            m.put("type", cell.type());
+        }
+        m.put("text", cell.text() == null ? "" : cell.text());
+        if (cell.expr() != null) {
+            m.put("expr", cell.expr());
+        }
+        if (cell.dataset() != null) {
+            m.put("dataset", cell.dataset());
+        }
+        if (cell.align() != null) {
+            m.put("align", cell.align());
+        }
+        if (cell.background() != null) {
+            m.put("background", cell.background());
+        }
+        if (cell.color() != null) {
+            m.put("color", cell.color());
+        }
+        if (cell.bold()) {
+            m.put("bold", Boolean.TRUE);
+        }
+        if (cell.italic()) {
+            m.put("italic", Boolean.TRUE);
+        }
+        if (cell.fontPt() != null) {
+            m.put("font_pt", cell.fontPt());
+        }
+        if (cell.colSpan() != null && cell.colSpan() > 1) {
+            m.put("col_span", cell.colSpan());
+        }
+        if (cell.rowSpan() != null && cell.rowSpan() > 1) {
+            m.put("row_span", cell.rowSpan());
+        }
+        return m;
     }
 
     /** Краткое человекочитаемое описание (для панели чата). */
