@@ -38,6 +38,8 @@ import org.eclipse.birt.report.model.api.ExpressionType;
 import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
+import org.eclipse.birt.report.model.api.ListGroupHandle;
+import org.eclipse.birt.report.model.api.ListHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
 import org.eclipse.birt.report.model.api.OdaDataSourceHandle;
 import org.eclipse.birt.report.model.api.PropertyHandle;
@@ -474,6 +476,7 @@ public final class ReportBuilder {
         int tableIndex = 0;
         int gridIndex = 0;
         int imageIndex = 0;
+        int listIndex = 0;
         for (ReportSpec.BodyElement el : spec.body()) {
             if (el instanceof ReportSpec.Label) {
                 labelIndex++;
@@ -491,6 +494,10 @@ public final class ReportBuilder {
                 imageIndex++;
                 design.getBody().add(createImage(design, factory, (ReportSpec.Image) el,
                     "image_" + imageIndex));
+            } else if (el instanceof ReportSpec.ListElement) {
+                listIndex++;
+                design.getBody().add(createList(design, factory, spec,
+                    (ReportSpec.ListElement) el, "list_" + listIndex));
             }
         }
     }
@@ -1011,6 +1018,367 @@ public final class ReportBuilder {
             fcell.getContent().add(count);
             group.getFooter().add(footer);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Список (list)
+    // ------------------------------------------------------------------
+
+    /**
+     * Список BIRT: шаблон строки из колонок (в одну строку сетки), шапка,
+     * подвал, уровни группировки, сортировка и итоги. Логика привязок,
+     * сортировки и итогов — та же, что у таблицы (boundDataColumns, SortKey,
+     * aggregateFunction/arg); отличается только контейнер (ListGroup).
+     */
+    private static ListHandle createList(ReportDesignHandle design, ElementFactory factory,
+            ReportSpec spec, ReportSpec.ListElement el, String name) throws Exception {
+        List<ReportSpec.TableColumn> cols = el.columns();
+        ListHandle list = factory.newList(name);
+        for (ReportSpec.DataSet ds : spec.datasets()) {
+            if (ds.name().equals(el.dataset())) {
+                list.setDataSet(dataSetHandle(design, ds.name()));
+                break;
+            }
+        }
+
+        // Привязки: колонки шаблона, шапка/подвал, группы, сортировка.
+        PropertyHandle bound = list.getPropertyHandle("boundDataColumns");
+        Set<String> boundNames = new LinkedHashSet<String>();
+        for (ReportSpec.TableColumn col : cols) {
+            boundNames.addAll(col.refs());
+        }
+        for (ReportSpec.ListPart p : el.header()) {
+            boundNames.addAll(ReportSpec.exprRefs(p.expr()));
+        }
+        for (ReportSpec.ListPart p : el.footer()) {
+            boundNames.addAll(ReportSpec.exprRefs(p.expr()));
+        }
+        for (ReportSpec.GroupLevel g : el.groups()) {
+            boundNames.add(g.column());
+        }
+        for (ReportSpec.SortKey s : el.sort()) {
+            boundNames.addAll(ReportSpec.exprRefs(s.expr()));
+        }
+        if (bound != null) {
+            for (String ref : boundNames) {
+                ComputedColumn cc = new ComputedColumn();
+                cc.setName(ref);
+                cc.setDisplayName(ref);
+                cc.setExpression("dataSetRow[\"" + ref + "\"]");
+                String type = listColumnType(spec, el.dataset(), ref);
+                if (type != null) {
+                    cc.setDataType(type);
+                }
+                bound.addItem(cc);
+            }
+        }
+
+        // Вычисляемые колонки — как у таблицы: привязка на колонку списка.
+        java.util.Map<Integer, String> computedBindings = new HashMap<Integer, String>();
+        if (bound != null) {
+            for (int i = 0; i < cols.size(); i++) {
+                ReportSpec.TableColumn col = cols.get(i);
+                if (col.resultColumn() != null) {
+                    continue;
+                }
+                String binding = name + "_c" + (i + 1);
+                ComputedColumn cc = new ComputedColumn();
+                cc.setName(binding);
+                cc.setDisplayName(binding);
+                cc.setExpression(col.expr());
+                if (col.type() != null) {
+                    cc.setDataType(col.type());
+                }
+                bound.addItem(cc);
+                computedBindings.put(Integer.valueOf(i), binding);
+            }
+        }
+
+        // Шапка: слот list принимает только grid/free-form, поэтому
+        // элементы шапки раскладываются в grid (как и подвал).
+        List<ReportSpec.ListPart> headerParts = el.header();
+        if (!headerParts.isEmpty()) {
+            list.getHeader().add(createListGrid(factory, headerParts, name + "_hr", true));
+        }
+
+        // Строка данных: grid шириной в число колонок шаблона.
+        ListHandle unused = null;
+        org.eclipse.birt.report.model.api.GridHandle detail = factory.newGridItem(
+            name + "_dr", cols.size(), 1);
+        RowHandle detailRow = (RowHandle) detail.getRows().get(0);
+        for (int i = 0; i < cols.size(); i++) {
+            ReportSpec.TableColumn col = cols.get(i);
+            if (col.widthMm() != null) {
+                ((org.eclipse.birt.report.model.api.ColumnHandle) detail.getColumns().get(i))
+                    .getWidth().setStringValue(fmtMm(col.widthMm()) + "mm");
+            }
+            CellHandle dc = (CellHandle) detailRow.getCells().get(i);
+            if (col.background() != null) {
+                dc.setProperty("backgroundColor", col.background());
+            }
+            DataItemHandle item = factory.newDataItem(name + "_d" + (i + 1));
+            item.setProperty("fontFamily", FONT_FAMILY);
+            if (col.resultColumn() != null) {
+                item.setResultSetColumn(col.resultColumn());
+            } else {
+                String binding = computedBindings.get(Integer.valueOf(i));
+                if (binding != null) {
+                    item.setResultSetColumn(binding);
+                } else {
+                    item.setValueExpr(col.expr());
+                }
+            }
+            if (col.align() != null) {
+                item.setProperty("textAlign", col.align());
+            }
+            if (col.bold()) {
+                item.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+            }
+            if (col.italic()) {
+                item.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+            }
+            if (col.color() != null) {
+                item.setProperty("color", col.color());
+            }
+            dc.getContent().add(item);
+        }
+        list.getDetail().add(detail);
+
+        // Подвал: элементы footer (если задан) и итоги по колонкам.
+        boolean hasTotal = false;
+        for (ReportSpec.TableColumn col : cols) {
+            if (col.total() != null) {
+                hasTotal = true;
+                break;
+            }
+        }
+        if (!el.footer().isEmpty() || hasTotal) {
+            org.eclipse.birt.report.model.api.GridHandle footer = factory.newGridItem(
+                name + "_fr", cols.size(), 1);
+            RowHandle footerRow = (RowHandle) footer.getRows().get(0);
+            for (int i = 0; i < cols.size(); i++) {
+                ReportSpec.TableColumn col = cols.get(i);
+                CellHandle fc = (CellHandle) footerRow.getCells().get(i);
+                if (col.total() != null) {
+                    String binding = name + "_t" + (i + 1);
+                    ComputedColumn cc = new ComputedColumn();
+                    cc.setName(binding);
+                    cc.setDisplayName(binding);
+                    cc.setAggregateFunction(aggregateFunction(col.total()));
+                    String type = aggregateType(col.total(), col);
+                    if (type != null) {
+                        cc.setDataType(type);
+                    }
+                    String ownBinding = col.resultColumn();
+                    if (ownBinding == null) {
+                        ownBinding = computedBindings.get(Integer.valueOf(i));
+                    }
+                    String argExpr = ownBinding == null
+                        ? col.expr() : "row[\"" + ownBinding + "\"]";
+                    AggregationArgument arg = new AggregationArgument();
+                    arg.setName("Expression");
+                    arg.setExpressionProperty(AggregationArgument.VALUE_MEMBER,
+                        new Expression(argExpr, ExpressionType.JAVASCRIPT));
+                    cc.addArgument(arg);
+                    if (bound != null) {
+                        bound.addItem(cc);
+                    }
+                    DataItemHandle item = factory.newDataItem(name + "_tf" + (i + 1));
+                    item.setProperty("fontFamily", FONT_FAMILY);
+                    item.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+                    if (col.align() != null) {
+                        item.setProperty("textAlign", col.align());
+                    }
+                    item.setResultSetColumn(binding);
+                    fc.getContent().add(item);
+                }
+            }
+            // Дополнительные элементы подвала (footer[]) — в свободные ячейки.
+            int slot = 0;
+            for (ReportSpec.ListPart p : el.footer()) {
+                while (slot < cols.size() && cols.get(slot).total() != null) {
+                    slot++;
+                }
+                if (slot >= cols.size()) {
+                    break;
+                }
+                CellHandle fc = (CellHandle) footerRow.getCells().get(slot);
+                addListPart(factory, fc, p, name + "_f" + (slot + 1));
+                slot++;
+            }
+            list.getFooter().add(footer);
+        }
+
+        // Группировка: ListGroup с заголовком/счётчиком, как у таблицы.
+        for (int g = 0; g < el.groups().size(); g++) {
+            addListGroup(factory, list, el.groups().get(g), name + "_g" + (g + 1),
+                cols.size());
+        }
+        if (!el.sort().isEmpty()) {
+            PropertyHandle sortHandle = list.getPropertyHandle("sort");
+            if (sortHandle != null) {
+                for (ReportSpec.SortKey sk : el.sort()) {
+                    SortKey key = new SortKey();
+                    key.setKey(sk.expr());
+                    key.setDirection(sk.descending()
+                        ? DesignChoiceConstants.SORT_DIRECTION_DESC
+                        : DesignChoiceConstants.SORT_DIRECTION_ASC);
+                    sortHandle.addItem(key);
+                }
+            }
+        }
+        return list;
+    }
+
+    /** Строка списка с заданным числом ячеек. */
+    private static RowHandle createRowWithCells(ElementFactory factory, int cells, String name)
+            throws Exception {
+        return factory.newTableRow(cells);
+    }
+
+    /** Строка группы списка как grid (слот группы тоже принимает grid/free-form). */
+    private static org.eclipse.birt.report.model.api.GridHandle createListGrid(
+            ElementFactory factory, List<ReportSpec.ListPart> parts, String name,
+            boolean headerStyle) throws Exception {
+        org.eclipse.birt.report.model.api.GridHandle grid = factory.newGridItem(
+            name, Math.max(1, parts.size()), 1);
+        RowHandle row = (RowHandle) grid.getRows().get(0);
+        for (int i = 0; i < parts.size(); i++) {
+            CellHandle cell = (CellHandle) row.getCells().get(i);
+            if (headerStyle) {
+                cell.setProperty("backgroundColor", "#eef2f7");
+            }
+            addListPart(factory, cell, parts.get(i), name + "_p" + (i + 1));
+        }
+        return grid;
+    }
+
+    /** Простой элемент шапки/подвала списка в ячейку. */
+    private static void addListPart(ElementFactory factory, CellHandle cell,
+            ReportSpec.ListPart part, String name) throws Exception {
+        if ("data".equals(part.type())) {
+            DataItemHandle item = factory.newDataItem(name + "_data");
+            item.setProperty("fontFamily", FONT_FAMILY);
+            item.setResultSetColumn(part.resultColumn());
+            if (part.align() != null) {
+                item.setProperty("textAlign", part.align());
+            }
+            if (part.bold()) {
+                item.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+            }
+            if (part.italic()) {
+                item.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+            }
+            if (part.color() != null) {
+                item.setProperty("color", part.color());
+            }
+            cell.getContent().add(item);
+        } else {
+            LabelHandle label = factory.newLabel(name + "_lbl");
+            label.setText(part.text() == null ? "" : part.text());
+            label.setProperty("fontFamily", FONT_FAMILY);
+            if (part.bold()) {
+                label.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+            }
+            if (part.italic()) {
+                label.setProperty("fontStyle", DesignChoiceConstants.FONT_STYLE_ITALIC);
+            }
+            if (part.color() != null) {
+                label.setProperty("color", part.color());
+            }
+            if (part.align() != null) {
+                label.setProperty("textAlign", part.align());
+            }
+            cell.getContent().add(label);
+        }
+    }
+
+    /** Группа списка: заголовок со значением ключа и (опционально) счётчик. */
+    private static void addListGroup(ElementFactory factory, ListHandle list,
+            ReportSpec.GroupLevel level, String name, int columnCount) throws Exception {
+        ListGroupHandle group = factory.newListGroup();
+        group.setName(name + "_grp");
+        group.setKeyExpr("row[\"" + level.column() + "\"]");
+        list.getGroups().add(group);
+
+        LabelHandle caption = factory.newLabel(name + "_gt");
+        caption.setText(level.title() + ": ");
+        caption.setProperty("fontFamily", FONT_FAMILY);
+        caption.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+
+        DataItemHandle key = factory.newDataItem(name + "_gk");
+        key.setProperty("fontFamily", FONT_FAMILY);
+        key.setProperty("fontWeight", DesignChoiceConstants.FONT_WEIGHT_BOLD);
+        key.setResultSetColumn(level.column());
+        // Слот группы list принимает только grid/free-form (как и у списка).
+        org.eclipse.birt.report.model.api.GridHandle groupGrid = factory.newGridItem(
+            name + "_gg", 1, 1);
+        RowHandle gridRow = (RowHandle) groupGrid.getRows().get(0);
+        CellHandle gridCell = (CellHandle) gridRow.getCells().get(0);
+        gridCell.setProperty("backgroundColor", "#eef2f7");
+        gridCell.getContent().add(caption);
+        gridCell.getContent().add(key);
+        group.getHeader().add(groupGrid);
+
+        if (level.count()) {
+            String countName = name + "_gcnt";
+            int suffix = 1;
+            while (list.findColumnBinding(countName) != null) {
+                suffix++;
+                countName = name + "_gcnt" + suffix;
+            }
+            ComputedColumn countColumn = new ComputedColumn();
+            countColumn.setName(countName);
+            countColumn.setDisplayName(countName);
+            countColumn.setExpression("Total.count()");
+            countColumn.setAggregateOn(group.getName());
+            countColumn.setDataType(DesignChoiceConstants.COLUMN_DATA_TYPE_INTEGER);
+            PropertyHandle countBindings = list.getPropertyHandle("boundDataColumns");
+            if (countBindings != null) {
+                countBindings.addItem(countColumn);
+            }
+
+            // Подвал группы list принимает только grid/free-form, не Row.
+            LabelHandle total = factory.newLabel(name + "_gc");
+            total.setText("Всего строк в группе: ");
+            total.setProperty("fontFamily", FONT_FAMILY);
+            DataItemHandle count = factory.newDataItem(name + "_gcnt_item");
+            count.setProperty("fontFamily", FONT_FAMILY);
+            count.setResultSetColumn(countName);
+            org.eclipse.birt.report.model.api.GridHandle footGrid = factory.newGridItem(
+                name + "_gf", 1, 1);
+            RowHandle footRow = (RowHandle) footGrid.getRows().get(0);
+            CellHandle gcell = (CellHandle) footRow.getCells().get(0);
+            gcell.setProperty("backgroundColor", "#eef2f7");
+            gcell.getContent().add(total);
+            gcell.getContent().add(count);
+            group.getFooter().add(footGrid);
+        }
+    }
+
+    /** Тип колонки набора данных списка по имени. */
+    private static String listColumnType(ReportSpec spec, String dataset, String column) {
+        for (ReportSpec.DataSet ds : spec.datasets()) {
+            if (ds.name().equals(dataset)) {
+                for (ReportSpec.DatasetColumn c : ds.columns()) {
+                    if (c.name().equals(column)) {
+                        return c.type();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Тип вычисляемой колонки итога списка. */
+    private static String aggregateType(String total, ReportSpec.TableColumn col) {
+        if ("count".equals(total)) {
+            return "integer";
+        }
+        if ("sum".equals(total) || "avg".equals(total)) {
+            return "decimal";
+        }
+        return col.type() == null ? "string" : col.type();
     }
 
     /** Тип столбца набора данных по его имени (для привязки столбцов таблицы). */

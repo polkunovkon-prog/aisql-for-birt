@@ -31,6 +31,8 @@ import org.eclipse.birt.report.model.api.DesignEngine;
 import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
+import org.eclipse.birt.report.model.api.ListGroupHandle;
+import org.eclipse.birt.report.model.api.ListHandle;
 import org.eclipse.birt.report.model.api.MasterPageHandle;
 import org.eclipse.birt.report.model.api.OdaDataSetHandle;
 import org.eclipse.birt.report.model.api.OdaDataSourceHandle;
@@ -178,6 +180,32 @@ public final class ReportBuilderTest {
             + "     \"columns\": ["
             + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\" },"
             + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\", \"total\": \"count\" } ] } ]"
+            + "}";
+    }
+
+    /** Спецификация со списком: шапка, группировка, сортировка, итог. */
+    private static String listSpecJson() {
+        return "{"
+            + " \"report\": { \"name\": \"students_list\", \"title\": \"Список\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "                        \"driver\": \"org.postgresql.Driver\","
+            + "                        \"url\": \"jdbc:postgresql://127.0.0.1:5432/hogwarts\","
+            + "                        \"user\": \"agent_user\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsStudents\", \"datasource\": \"dsDB\","
+            + "                    \"sql\": \"select last_name, first_name, house_name, grade_level from students\","
+            + "                    \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"first_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"list\", \"dataset\": \"dsStudents\", \"header\": true, \"total_label\": \"Всего\","
+            + "     \"footer\": [ { \"type\": \"label\", \"text\": \"Конец списка\" } ],"
+            + "     \"groups\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"title\": \"Факультет\", \"count\": true } ],"
+            + "     \"sort\": [ { \"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\" } ],"
+            + "     \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"width_mm\": 50, \"bold\": true },"
+            + "       { \"header\": \"Имя\", \"expr\": \"row[\\\"first_name\\\"]\", \"width_mm\": 40 },"
+            + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\", \"align\": \"center\", \"total\": \"count\" } ] } ]"
             + "}";
     }
 
@@ -504,6 +532,87 @@ public final class ReportBuilderTest {
             T.eq(1, table.getFooter().getCount(), "итоги: подвал таблицы при группах");
         } finally {
             sgSession.closeAll(false);
+        }
+
+        // --- Список (list): шапка, группы, сортировка, итог ---
+        ReportSpec ls = ReportSpec.parse(listSpecJson());
+        File lsTarget = new File(dir, ls.name() + ".rptdesign");
+        ReportBuilder.build(ls, lsTarget, "parol-dlya-testa");
+        T.check(lsTarget.isFile(), "файл отчёта со списком создан");
+
+        String lsXml = new String(Files.readAllBytes(lsTarget.toPath()),
+            StandardCharsets.UTF_8);
+        T.check(lsXml.contains("<list ") || lsXml.contains("<list>"),
+            "список: элемент list записан в файл");
+        T.check(lsXml.contains("list-group") || lsXml.contains("<group "),
+            "список: группа списка записана в файл");
+        T.check(lsXml.contains("<data ") || lsXml.contains("<data>"),
+            "список: элементы данных записаны в файл");
+        T.check(lsXml.contains("aggregateFunction"), "список: итог записан в файл");
+
+        SessionHandle lsSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle design = lsSession.openDesign(lsTarget.getAbsolutePath());
+            T.eq(1, design.getBody().getCount(), "список: один элемент в теле отчёта");
+            ListHandle list = (ListHandle) design.getBody().get(0);
+            T.check(list.getDataSet() != null
+                && "dsStudents".equals(list.getDataSet().getName()),
+                "список: связан с набором данных");
+            T.check(list.findColumnBinding("last_name") != null,
+                "список: привязка колонки last_name");
+            T.eq(1, list.getHeader().getCount(), "список: шапка");
+            // Шапка/строки list — grid (Row в эти слоты не допускается).
+            GridHandle listHeaderGrid = (GridHandle) list.getHeader().get(0);
+            RowHandle listHeader = (RowHandle) listHeaderGrid.getRows().get(0);
+            T.eq(3, listHeader.getCells().getCount(), "список: три ячейки шапки");
+            CellHandle hc = (CellHandle) listHeader.getCells().get(0);
+            LabelHandle hl = (LabelHandle) hc.getContent().get(0);
+            T.eq("Фамилия", hl.getText(), "список: текст шапки из columns[].header");
+
+            T.eq(1, list.getDetail().getCount(), "список: строка данных");
+            GridHandle listDetailGrid = (GridHandle) list.getDetail().get(0);
+            RowHandle listDetail = (RowHandle) listDetailGrid.getRows().get(0);
+            T.eq(3, listDetail.getCells().getCount(), "список: три ячейки данных");
+            DataItemHandle di = (DataItemHandle)
+                ((CellHandle) listDetail.getCells().get(0)).getContent().get(0);
+            T.eq("last_name", di.getResultSetColumn(), "список: ячейка привязана к колонке");
+
+            T.eq(1, list.getGroups().getCount(), "список: одна группа");
+            ListGroupHandle lg = (ListGroupHandle) list.getGroups().get(0);
+            T.eq("row[\"house_name\"]", lg.getKeyExpr(), "список: ключ группы");
+            T.eq(1, lg.getHeader().getCount(), "список: заголовок группы");
+            T.eq(1, lg.getFooter().getCount(), "список: подвал группы со счётчиком");
+            // Подвал группы list — grid (Row в этот слот не допускается).
+            GridHandle gfGrid = (GridHandle) lg.getFooter().get(0);
+            RowHandle gf = (RowHandle) gfGrid.getRows().get(0);
+            DataItemHandle gc = (DataItemHandle)
+                ((CellHandle) gf.getCells().get(0)).getContent().get(1);
+            ComputedColumnHandle gcb = list.findColumnBinding(gc.getResultSetColumn());
+            T.check(gcb != null && "Total.count()".equals(gcb.getExpression())
+                && lg.getName().equals(gcb.getAggregateOn()),
+                "список: счётчик группы по Total.count()");
+
+            java.util.List<?> sortKeys = list.getPropertyHandle("sort").getListValue();
+            T.eq(1, sortKeys.size(), "список: один ключ сортировки");
+            org.eclipse.birt.report.model.api.elements.structures.SortKey sk =
+                (org.eclipse.birt.report.model.api.elements.structures.SortKey) sortKeys.get(0);
+            T.eq("row[\"last_name\"]", sk.getKey(), "список: ключ сортировки");
+            T.eq("desc", sk.getDirection(), "список: направление сортировки");
+
+            T.eq(1, list.getFooter().getCount(), "список: подвал");
+            GridHandle listFooterGrid = (GridHandle) list.getFooter().get(0);
+            RowHandle listFooter = (RowHandle) listFooterGrid.getRows().get(0);
+            CellHandle fc = (CellHandle) listFooter.getCells().get(2);
+            DataItemHandle ti = (DataItemHandle) fc.getContent().get(0);
+            ComputedColumnHandle tb = list.findColumnBinding(ti.getResultSetColumn());
+            T.check(tb != null && "count".equals(tb.getAggregateFunction()),
+                "список: итог count по колонке");
+            CellHandle f0 = (CellHandle) listFooter.getCells().get(0);
+            LabelHandle fl = (LabelHandle) f0.getContent().get(0);
+            T.eq("Конец списка", fl.getText(), "список: элемент подвала из footer");
+        } finally {
+            lsSession.closeAll(false);
         }
 
         // Пустая спецификация не принимается.

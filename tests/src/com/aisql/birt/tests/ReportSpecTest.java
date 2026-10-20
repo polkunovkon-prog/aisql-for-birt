@@ -338,6 +338,77 @@ public final class ReportSpecTest {
             "уже используется");
         expectProblems(grouped.replace("\"groups\":", "\"group_by\": \"house_name\", \"groups\":"),
             "нельзя задавать вместе");
+
+        // 11. Список (list)
+        listSpecTests();
+    }
+
+    private static void listSpecTests() throws Exception {
+        String list = "{"
+            + " \"report\": { \"name\": \"lst\", \"title\": \"Список\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select last_name, first_name, house_name, grade_level from students\","
+            + "   \"columns\": [ { \"name\": \"last_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"first_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"grade_level\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"list\", \"dataset\": \"dsA\", \"header\": true,"
+            + "     \"footer\": [ { \"type\": \"label\", \"text\": \"Конец списка\", \"bold\": true } ],"
+            + "     \"groups\": [ { \"expr\": \"row[\\\"house_name\\\"]\", \"title\": \"Факультет\", \"count\": true } ],"
+            + "     \"sort\": [ { \"expr\": \"row[\\\"last_name\\\"]\", \"direction\": \"desc\" } ],"
+            + "     \"columns\": ["
+            + "       { \"header\": \"Фамилия\", \"expr\": \"row[\\\"last_name\\\"]\", \"width_mm\": 50, \"bold\": true },"
+            + "       { \"header\": \"Имя\", \"expr\": \"row[\\\"first_name\\\"]\", \"width_mm\": 40 },"
+            + "       { \"header\": \"Курс\", \"expr\": \"row[\\\"grade_level\\\"]\", \"align\": \"center\", \"total\": \"count\" } ] } ]"
+            + "}";
+        ReportSpec ls = ReportSpec.parse(list);
+        ReportSpec.ListElement le = (ReportSpec.ListElement) ls.body().get(0);
+        T.eq("dsA", le.dataset(), "список: набор данных");
+        T.eq(3, le.columns().size(), "список: три колонки шаблона");
+        T.eq(50.0, le.columns().get(0).widthMm(), "список: ширина колонки");
+        T.check(le.columns().get(0).bold(), "список: стиль колонки");
+        T.eq("count", le.columns().get(2).total(), "список: итог колонки");
+        T.check(le.hasHeader(), "список: шапка из columns[].header");
+        T.eq(3, le.header().size(), "список: три элемента шапки");
+        T.eq("Фамилия", le.header().get(0).text(), "список: текст шапки");
+        T.check(le.hasFooter(), "список: подвал");
+        T.eq("Конец списка", le.footer().get(0).text(), "список: текст подвала");
+        T.eq(1, le.groups().size(), "список: один уровень группировки");
+        T.eq("house_name", le.groups().get(0).column(), "список: колонка группировки");
+        T.check(le.groups().get(0).count(), "список: счётчик группы");
+        T.eq(1, le.sort().size(), "список: ключ сортировки");
+        T.check(le.sort().get(0).descending(), "список: сортировка по убыванию");
+        T.eq("Всего", le.totalLabel() == null ? "Всего" : le.totalLabel(),
+            "список: подпись итогов (по умолчанию)");
+        String sum = ls.summary();
+        T.check(sum.contains("список"), "сводка: список упомянут");
+        T.check(sum.contains("группировка"), "сводка списка: группировка");
+        T.check(sum.contains("сортировка"), "сводка списка: сортировка");
+        ReportSpec lsAgain = ReportSpec.parse(ls.toJson());
+        ReportSpec.ListElement le2 = (ReportSpec.ListElement) lsAgain.body().get(0);
+        T.eq(3, le2.columns().size(), "оборот списка: колонки");
+        T.eq(1, le2.groups().size(), "оборот списка: группы");
+        T.eq(1, le2.sort().size(), "оборот списка: сортировка");
+        T.eq(3, le2.header().size(), "оборот списка: шапка");
+        T.eq("count", le2.columns().get(2).total(), "оборот списка: итог");
+
+        // Ошибки списка
+        expectProblems(list.replace("\"header\": true", "\"header\": true, \"стиль\": 1"),
+            "неизвестное поле");
+        expectProblems(list.replace("\"dataset\": \"dsA\"", "\"dataset\": \"dsNope\""),
+            "набор данных не описан");
+        expectProblems(list.replace("row[\\\"first_name\\\"]", "row[\\\"нет_колонки\\\"]"),
+            "не описана");
+        expectProblems(list.replace("\"width_mm\": 50", "\"width_mm\": -5"),
+            "допустимо 5–300");
+        expectProblems(list.replace("\"expr\": \"row[\\\"house_name\\\"]\", \"title\"",
+            "\"expr\": \"\", \"title\""), "не может быть пустым");
+        expectProblems(list.replace("\"groups\": [", "\"groups\": [ ], \"x\": ["),
+            "неизвестное поле");
     }
 
     /** Спецификация с таблицей: SQL, params и доп. поля колонок задаются извне. */

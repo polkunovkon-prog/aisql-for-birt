@@ -426,6 +426,83 @@ public final class ReportSpec {
         @Override public String type() { return "table"; }
     }
 
+    /**
+     * Простой элемент шапки/подвала списка: надпись (label) или поле данных
+     * (data) с выражением row["..."].
+     */
+    public static final class ListPart {
+        private final String type;
+        private final String text;
+        private final String expr;
+        private final String align;
+        private final boolean bold;
+        private final boolean italic;
+        private final String color;
+
+        ListPart(String type, String text, String expr, String align,
+                boolean bold, boolean italic, String color) {
+            this.type = type;
+            this.text = text;
+            this.expr = expr;
+            this.align = align;
+            this.bold = bold;
+            this.italic = italic;
+            this.color = color;
+        }
+
+        public String type() { return type; }
+        public String text() { return text; }
+        public String expr() { return expr; }
+        public String align() { return align; }
+        public boolean bold() { return bold; }
+        public boolean italic() { return italic; }
+        public String color() { return color; }
+        public String resultColumn() {
+            Matcher m = COLUMN_EXPR_RE.matcher(expr == null ? "" : expr);
+            return m.matches() ? m.group(1) : null;
+        }
+    }
+
+    /**
+     * Список BIRT (list): шаблон строки из колонок, необязательные шапка и
+     * подвал, уровни группировки, сортировка и итоги — та же модель, что
+     * у таблицы, где это применимо (TableColumn/GroupLevel/SortKey).
+     */
+    public static final class ListElement extends BodyElement {
+        private final String dataset;
+        private final List<TableColumn> columns;
+        private final List<ListPart> header;
+        private final List<ListPart> footer;
+        private final List<GroupLevel> groups;
+        private final List<SortKey> sort;
+        private final String totalLabel;
+
+        ListElement(String dataset, List<TableColumn> columns,
+                List<ListPart> header, List<ListPart> footer,
+                List<GroupLevel> groups, List<SortKey> sort, String totalLabel) {
+            this.dataset = dataset;
+            this.columns = Collections.unmodifiableList(columns);
+            this.header = Collections.unmodifiableList(header);
+            this.footer = Collections.unmodifiableList(footer);
+            this.groups = Collections.unmodifiableList(groups);
+            this.sort = Collections.unmodifiableList(sort);
+            this.totalLabel = totalLabel;
+        }
+
+        public String dataset() { return dataset; }
+        public List<TableColumn> columns() { return columns; }
+        public List<ListPart> header() { return header; }
+        public List<ListPart> footer() { return footer; }
+        public boolean hasHeader() { return !header.isEmpty(); }
+        public boolean hasFooter() { return !footer.isEmpty(); }
+        public List<GroupLevel> groups() { return groups; }
+        public boolean hasGroups() { return !groups.isEmpty(); }
+        public List<SortKey> sort() { return sort; }
+        public String totalLabel() { return totalLabel; }
+
+        @Override public String type() { return "list"; }
+    }
+
     /** Ячейка grid/таблицы: надпись, поле данных или HTML-текст. */
     public static final class Cell {
         private final String type;
@@ -893,9 +970,15 @@ public final class ReportSpec {
                     if (el != null) {
                         body.add(el);
                     }
+                } else if ("list".equals(type)) {
+                    BodyElement el = parseList(e, i, problems, datasets);
+                    if (el != null) {
+                        body.add(el);
+                    }
                 } else {
                     problems.add("body[" + i + "].type «" + type
-                        + "»: на этом этапе поддерживаются «label», «table», «grid» и «image»");
+                        + "»: на этом этапе поддерживаются «label», «table», «grid»,"
+                        + " «image» и «list»");
                 }
             }
         }
@@ -1302,6 +1385,31 @@ public final class ReportSpec {
                     problems.add(where + " должен быть объектом");
                     continue;
                 }
+                TableColumn parsed = parseColumn(c, where, problems, ds, dataset);
+                if (parsed != null) {
+                    cols.add(parsed);
+                }
+            }
+        }
+        if (dataset == null || cols.isEmpty()) {
+            return null;
+        }
+        boolean hasTotal = false;
+        for (TableColumn col : cols) {
+            if (col.total() != null) {
+                hasTotal = true;
+                break;
+            }
+        }
+        if (!hasTotal) {
+            totalLabel = null;
+        }
+        return new Table(dataset, cols, groups, totalLabel, filter, sort);
+    }
+
+    /** Разбор колонки таблицы/списка: {header, expr, width_mm, ...}. */
+    private static TableColumn parseColumn(Map<String, Object> c, String where,
+            List<String> problems, DataSet ds, String dataset) {
                 checkUnknown(c, problems, where,
                     "header", "expr", "width_mm", "align", "type",
                     "bold", "italic", "color", "background", "header_background",
@@ -1395,7 +1503,7 @@ public final class ReportSpec {
                     }
                 }
                 if (header == null || expr == null) {
-                    continue;
+                    return null;
                 }
                 String resultCol = null;
                 List<String> refs = new ArrayList<String>();
@@ -1421,11 +1529,91 @@ public final class ReportSpec {
                             + "» не описана в datasets." + dataset + ".columns");
                     }
                 }
-                cols.add(new TableColumn(header, expr, width, align, type,
+                return new TableColumn(header, expr, width, align, type,
                     bold, italic, color, background, headerBackground, resultCol, refs,
-                    total, highlights));
+                    total, highlights);
+    }
+
+    /**
+     * Разбор списка (list): dataset, columns (та же модель, что у таблицы),
+     * header/footer (массив простых элементов либо флаг из columns[].header),
+     * groups, sort, total_label.
+     */
+    private static BodyElement parseList(Map<String, Object> e, int i,
+            List<String> problems, List<DataSet> datasets) {
+        String where = "body[" + i + "]";
+        checkUnknown(e, problems, where,
+            "type", "dataset", "columns", "header", "footer", "groups", "sort",
+            "total_label");
+        String dataset = strField(e, "dataset", true, problems, where);
+        DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
+        if (dataset != null && ds == null) {
+            problems.add(where + ".dataset «" + dataset + "»: набор данных не описан");
+        }
+        String totalLabel = strField(e, "total_label", false, problems, where);
+        if (totalLabel != null && totalLabel.length() > 200) {
+            problems.add(where + ".total_label длиннее 200 символов");
+            totalLabel = null;
+        }
+        List<GroupLevel> groups = parseGroups(e, i, problems, ds, dataset,
+            null, null, false);
+        List<SortKey> sort = parseSort(e, i, problems, ds, dataset);
+
+        // Колонки шаблона строки — те же поля, что у таблицы (без filter/highlight
+        // не обрезаем: правила одинаковые, поддержаны стили и total).
+        List<TableColumn> cols = new ArrayList<TableColumn>();
+        List<Object> colsRaw = arrField(e, "columns", problems, where);
+        if (colsRaw == null || colsRaw.isEmpty()) {
+            problems.add(where + " («list»): нужен непустой список columns");
+        } else {
+            if (colsRaw.size() > MAX_TABLE_COLUMNS) {
+                problems.add(where + ": колонок больше " + MAX_TABLE_COLUMNS);
+            }
+            int j = 0;
+            for (Object co : colsRaw) {
+                j++;
+                String cw = where + ".columns[" + j + "]";
+                Map<String, Object> c = Json.asObj(co);
+                if (c == null) {
+                    problems.add(cw + " должен быть объектом");
+                    continue;
+                }
+                TableColumn col = parseColumn(c, cw, problems, ds, dataset);
+                if (col != null) {
+                    cols.add(col);
+                }
             }
         }
+
+        // header/footer: массив простых элементов label/data, булев флаг
+        // (шапка из columns[].header) или отсутствие.
+        List<ListPart> header = new ArrayList<ListPart>();
+        Object hRaw = e.get("header");
+        if (hRaw != null) {
+            if (hRaw instanceof Boolean) {
+                if (Boolean.TRUE.equals(hRaw)) {
+                    for (TableColumn col : cols) {
+                        header.add(new ListPart("label", col.header(), null,
+                            col.align(), true, false, col.color()));
+                    }
+                }
+            } else {
+                header = parseListParts(hRaw, where + ".header", problems, ds, dataset);
+            }
+        }
+        List<ListPart> footer = new ArrayList<ListPart>();
+        Object fRaw = e.get("footer");
+        if (fRaw != null) {
+            if (fRaw instanceof Boolean) {
+                if (Boolean.TRUE.equals(fRaw)) {
+                    footer.add(new ListPart("label", totalLabel == null ? "Итого" : totalLabel,
+                        null, null, true, false, null));
+                }
+            } else {
+                footer = parseListParts(fRaw, where + ".footer", problems, ds, dataset);
+            }
+        }
+
         if (dataset == null || cols.isEmpty()) {
             return null;
         }
@@ -1439,7 +1627,76 @@ public final class ReportSpec {
         if (!hasTotal) {
             totalLabel = null;
         }
-        return new Table(dataset, cols, groups, totalLabel, filter, sort);
+        return new ListElement(dataset, cols, header, footer, groups, sort, totalLabel);
+    }
+
+    /** Элементы шапки/подвала списка: [{type: label|data, text, expr, ...}]. */
+    private static List<ListPart> parseListParts(Object raw, String where,
+            List<String> problems, DataSet ds, String dataset) {
+        List<ListPart> parts = new ArrayList<ListPart>();
+        List<Object> list = Json.asArr(raw);
+        if (list == null) {
+            problems.add(where + " должен быть массивом элементов label/data");
+            return parts;
+        }
+        if (list.size() > MAX_TABLE_COLUMNS) {
+            problems.add(where + ": элементов больше " + MAX_TABLE_COLUMNS);
+        }
+        int k = 0;
+        for (Object o : list) {
+            k++;
+            String w = where + "[" + k + "]";
+            Map<String, Object> p = Json.asObj(o);
+            if (p == null) {
+                problems.add(w + " должен быть объектом {type, text|expr}");
+                continue;
+            }
+            checkUnknown(p, problems, w, "type", "text", "expr", "align",
+                "bold", "italic", "color");
+            String type = strField(p, "type", false, problems, w);
+            if (type != null && !"label".equals(type) && !"data".equals(type)) {
+                problems.add(w + ".type «" + type + "»: допустимы «label» и «data»");
+                type = null;
+            }
+            String text = strField(p, "text", false, problems, w);
+            String expr = strField(p, "expr", false, problems, w);
+            String align = strField(p, "align", false, problems, w);
+            if (align != null && !ALIGNS.contains(align)) {
+                problems.add(w + ".align «" + align + "»: допустимы " + ALIGNS);
+                align = null;
+            }
+            if (type == null) {
+                type = expr == null ? "label" : "data";
+            }
+            if ("label".equals(type)) {
+                if (text == null) {
+                    problems.add(w + ": для label нужен text");
+                    continue;
+                }
+            } else {
+                if (expr == null) {
+                    problems.add(w + ": для data нужен expr");
+                    continue;
+                }
+                if (!SIMPLE_EXPR_RE.matcher(expr).matches()
+                        || exprRefs(expr).isEmpty()) {
+                    problems.add(w + ".expr: нужно простое выражение с row[\"колонка\"]");
+                    continue;
+                }
+                for (String ref : exprRefs(expr)) {
+                    if (ds != null && !ds.columns().isEmpty()
+                            && findDatasetColumn(ds, ref) == null) {
+                        problems.add(w + ".expr: колонка «" + ref
+                            + "» не описана в datasets." + dataset + ".columns");
+                    }
+                }
+            }
+            parts.add(new ListPart(type, text, expr, align,
+                Json.asBool(p.get("bold"), false),
+                Json.asBool(p.get("italic"), false),
+                colorField(p, "color", problems, w)));
+        }
+        return parts;
     }
 
     /**
@@ -1944,58 +2201,7 @@ public final class ReportSpec {
                 }
                 List<Object> cs = Json.arr();
                 for (TableColumn c : t.columns()) {
-                    Map<String, Object> cm = Json.obj();
-                    cm.put("header", c.header());
-                    cm.put("expr", c.expr());
-                    if (c.widthMm() != null) {
-                        cm.put("width_mm", c.widthMm());
-                    }
-                    if (c.align() != null) {
-                        cm.put("align", c.align());
-                    }
-                    if (c.type() != null) {
-                        cm.put("type", c.type());
-                    }
-                    if (c.bold()) {
-                        cm.put("bold", Boolean.TRUE);
-                    }
-                    if (c.italic()) {
-                        cm.put("italic", Boolean.TRUE);
-                    }
-                    if (c.color() != null) {
-                        cm.put("color", c.color());
-                    }
-                    if (c.background() != null) {
-                        cm.put("background", c.background());
-                    }
-                    if (c.headerBackground() != null) {
-                        cm.put("header_background", c.headerBackground());
-                    }
-                    if (c.total() != null) {
-                        cm.put("total", c.total());
-                    }
-                    if (!c.highlights().isEmpty()) {
-                        List<Object> hs = Json.arr();
-                        for (Highlight h : c.highlights()) {
-                            Map<String, Object> hm = Json.obj();
-                            hm.put("when", h.when());
-                            if (h.color() != null) {
-                                hm.put("color", h.color());
-                            }
-                            if (h.background() != null) {
-                                hm.put("background", h.background());
-                            }
-                            if (h.bold()) {
-                                hm.put("bold", Boolean.TRUE);
-                            }
-                            if (h.italic()) {
-                                hm.put("italic", Boolean.TRUE);
-                            }
-                            hs.add(hm);
-                        }
-                        cm.put("highlight", hs);
-                    }
-                    cs.add(cm);
+                    cs.add(columnToJson(c));
                 }
                 tm.put("columns", cs);
                 bs.add(tm);
@@ -2036,10 +2242,143 @@ public final class ReportSpec {
                     im2.put("height_mm", im.heightMm());
                 }
                 bs.add(im2);
+            } else if (el instanceof ListElement) {
+                bs.add(listToJson((ListElement) el));
             }
         }
         root.put("body", bs);
         return Json.write(root);
+    }
+
+    /** Список (list) в карту для канонического JSON. */
+    private static Map<String, Object> listToJson(ListElement l) {
+        Map<String, Object> m = Json.obj();
+        m.put("type", "list");
+        m.put("dataset", l.dataset());
+        if (l.hasHeader()) {
+            m.put("header", partsToJson(l.header()));
+        }
+        if (l.hasFooter()) {
+            m.put("footer", partsToJson(l.footer()));
+        }
+        if (l.hasGroups()) {
+            List<Object> gs = Json.arr();
+            for (GroupLevel g : l.groups()) {
+                Map<String, Object> gm = Json.obj();
+                gm.put("expr", "row[\"" + g.column() + "\"]");
+                if (!"Группа".equals(g.title())) {
+                    gm.put("title", g.title());
+                }
+                if (g.count()) {
+                    gm.put("count", Boolean.TRUE);
+                }
+                gs.add(gm);
+            }
+            m.put("groups", gs);
+        }
+        if (!l.sort().isEmpty()) {
+            List<Object> ss = Json.arr();
+            for (SortKey s : l.sort()) {
+                Map<String, Object> sm = Json.obj();
+                sm.put("expr", s.expr());
+                sm.put("direction", s.direction());
+                ss.add(sm);
+            }
+            m.put("sort", ss);
+        }
+        if (l.totalLabel() != null && !"Итого".equals(l.totalLabel())) {
+            m.put("total_label", l.totalLabel());
+        }
+        List<Object> cs = Json.arr();
+        for (TableColumn c : l.columns()) {
+            cs.add(columnToJson(c));
+        }
+        m.put("columns", cs);
+        return m;
+    }
+
+    private static List<Object> partsToJson(List<ListPart> parts) {
+        List<Object> ps = Json.arr();
+        for (ListPart p : parts) {
+            Map<String, Object> pm = Json.obj();
+            pm.put("type", p.type());
+            if (p.text() != null) {
+                pm.put("text", p.text());
+            }
+            if (p.expr() != null) {
+                pm.put("expr", p.expr());
+            }
+            if (p.align() != null) {
+                pm.put("align", p.align());
+            }
+            if (p.bold()) {
+                pm.put("bold", Boolean.TRUE);
+            }
+            if (p.italic()) {
+                pm.put("italic", Boolean.TRUE);
+            }
+            if (p.color() != null) {
+                pm.put("color", p.color());
+            }
+            ps.add(pm);
+        }
+        return ps;
+    }
+
+    /** Колонка таблицы/списка в карту для канонического JSON. */
+    private static Map<String, Object> columnToJson(TableColumn c) {
+        Map<String, Object> cm = Json.obj();
+        cm.put("header", c.header());
+        cm.put("expr", c.expr());
+        if (c.widthMm() != null) {
+            cm.put("width_mm", c.widthMm());
+        }
+        if (c.align() != null) {
+            cm.put("align", c.align());
+        }
+        if (c.type() != null) {
+            cm.put("type", c.type());
+        }
+        if (c.bold()) {
+            cm.put("bold", Boolean.TRUE);
+        }
+        if (c.italic()) {
+            cm.put("italic", Boolean.TRUE);
+        }
+        if (c.color() != null) {
+            cm.put("color", c.color());
+        }
+        if (c.background() != null) {
+            cm.put("background", c.background());
+        }
+        if (c.headerBackground() != null) {
+            cm.put("header_background", c.headerBackground());
+        }
+        if (c.total() != null) {
+            cm.put("total", c.total());
+        }
+        if (!c.highlights().isEmpty()) {
+            List<Object> hs = Json.arr();
+            for (Highlight h : c.highlights()) {
+                Map<String, Object> hm = Json.obj();
+                hm.put("when", h.when());
+                if (h.color() != null) {
+                    hm.put("color", h.color());
+                }
+                if (h.background() != null) {
+                    hm.put("background", h.background());
+                }
+                if (h.bold()) {
+                    hm.put("bold", Boolean.TRUE);
+                }
+                if (h.italic()) {
+                    hm.put("italic", Boolean.TRUE);
+                }
+                hs.add(hm);
+            }
+            cm.put("highlight", hs);
+        }
+        return cm;
     }
 
     /** Превращает ячейку grid в карту для канонического JSON. */
@@ -2202,6 +2541,54 @@ public final class ReportSpec {
                 }
                 if (highlights > 0) {
                     sb.append("; условий оформления: ").append(highlights);
+                }
+            } else if (el instanceof ListElement) {
+                ListElement l = (ListElement) el;
+                sb.append("список ").append(l.columns().size()).append(" кол.");
+                sb.append(" (").append(l.dataset()).append("): ");
+                for (int j = 0; j < l.columns().size(); j++) {
+                    if (j > 0) {
+                        sb.append(", ");
+                    }
+                    sb.append(l.columns().get(j).header());
+                }
+                if (l.hasHeader()) {
+                    sb.append("; шапка: ").append(l.header().size()).append(" эл.");
+                }
+                if (l.hasFooter()) {
+                    sb.append("; подвал: ").append(l.footer().size()).append(" эл.");
+                }
+                if (l.hasGroups()) {
+                    sb.append("; группировка: ");
+                    for (int j = 0; j < l.groups().size(); j++) {
+                        GroupLevel g = l.groups().get(j);
+                        if (j > 0) {
+                            sb.append(" → ");
+                        }
+                        sb.append("«").append(g.title()).append("» по ").append(g.column());
+                        if (g.count()) {
+                            sb.append(" (со счётчиком)");
+                        }
+                    }
+                }
+                if (!l.sort().isEmpty()) {
+                    sb.append("; сортировка: ");
+                    for (int j = 0; j < l.sort().size(); j++) {
+                        SortKey s = l.sort().get(j);
+                        if (j > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(s.expr()).append(' ').append(s.direction());
+                    }
+                }
+                int totals = 0;
+                for (int j = 0; j < l.columns().size(); j++) {
+                    if (l.columns().get(j).total() != null) {
+                        totals++;
+                    }
+                }
+                if (totals > 0) {
+                    sb.append("; итоги: ").append(totals);
                 }
             }
         }
