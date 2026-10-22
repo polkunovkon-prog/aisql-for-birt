@@ -62,6 +62,12 @@ public final class ReportSelfTest {
         }
         out.println("SELFTEST: START spec=" + specFile + " out=" + outDir);
 
+        // Режим готового отчёта: рендер существующего .rptdesign без сборки.
+        // Нужен для приёмки любых отчётов (в том числе из архива own.rar).
+        if (specFile.getName().toLowerCase().endsWith(".rptdesign")) {
+            return renderDesign(specFile, outDir, out);
+        }
+
         // 1. Спецификация
         ReportSpec spec;
         try {
@@ -126,6 +132,43 @@ public final class ReportSelfTest {
             return 1;
         }
 
+        out.println("SELFTEST: RESULT OK");
+        return 0;
+    }
+
+    // ------------------------------------------------------------------
+
+    /** Рендер готового .rptdesign (без спецификации): PDF, HTML, журнал. */
+    private static int renderDesign(File design, File outDir, PrintStream out) {
+        String base = design.getName();
+        int dot = base.toLowerCase().lastIndexOf(".rptdesign");
+        if (dot > 0) {
+            base = base.substring(0, dot);
+        }
+        IReportEngine engine = null;
+        try {
+            String levelName = System.getProperty("aibirt.test.logLevel");
+            Level level = levelName == null || levelName.isEmpty()
+                ? Level.WARNING : Level.parse(levelName);
+            engine = ReportPreview.createEngine(outDir, level);
+            File pdf = new File(outDir, base + ".pdf");
+            ReportPreview.render(engine, design, null, null, "pdf", pdf);
+            out.println("SELFTEST: RENDER PDF OK bytes=" + pdf.length());
+            File html = new File(outDir, base + ".html");
+            ReportPreview.render(engine, design, null, null, "html", html);
+            out.println("SELFTEST: RENDER HTML OK bytes=" + html.length());
+        } catch (Throwable t) {
+            out.println("SELFTEST: ERROR рендер: " + describe(t));
+            return 1;
+        } finally {
+            ReportPreview.destroy(engine);
+        }
+        int severe = countSevere(outDir);
+        out.println("SELFTEST: LOG SEVERE=" + severe);
+        if (severe > 0) {
+            out.println("SELFTEST: ERROR в журнале движка есть ошибки (см. *.log)");
+            return 1;
+        }
         out.println("SELFTEST: RESULT OK");
         return 0;
     }

@@ -58,6 +58,9 @@ public final class ReportSpec {
     /** Функции итога (подвал таблицы). */
     public static final List<String> TOTALS = Collections.unmodifiableList(
         Arrays.asList("sum", "count", "avg", "min", "max"));
+    /** Виды диаграмм. */
+    public static final List<String> CHART_KINDS = Collections.unmodifiableList(
+        Arrays.asList("bar", "line", "pie"));
     /** Направления сортировки. */
     public static final List<String> SORT_DIRECTIONS = Collections.unmodifiableList(
         Arrays.asList("asc", "desc"));
@@ -590,6 +593,51 @@ public final class ReportSpec {
         @Override public String type() { return "image"; }
     }
 
+    /**
+     * Диаграмма по набору данных отчёта: столбчатая (bar), линейная (line)
+     * или круговая (pie). Категории — колонка {@code category}, значения —
+     * колонка {@code value}; необязательная {@code series} разбивает значения
+     * на несколько рядов (легенда). Значения агрегируются функцией
+     * {@code aggregate} (по умолчанию sum).
+     */
+    public static final class Chart extends BodyElement {
+        private final String kind;
+        private final String dataset;
+        private final String title;
+        private final String category;
+        private final String value;
+        private final String series;
+        private final String aggregate;
+        private final Double widthMm;
+        private final Double heightMm;
+
+        Chart(String kind, String dataset, String title, String category,
+                String value, String series, String aggregate,
+                Double widthMm, Double heightMm) {
+            this.kind = kind;
+            this.dataset = dataset;
+            this.title = title;
+            this.category = category;
+            this.value = value;
+            this.series = series;
+            this.aggregate = aggregate;
+            this.widthMm = widthMm;
+            this.heightMm = heightMm;
+        }
+
+        public String kind() { return kind; }
+        public String dataset() { return dataset; }
+        public String title() { return title; }
+        public String category() { return category; }
+        public String value() { return value; }
+        public String series() { return series; }
+        public String aggregate() { return aggregate; }
+        public Double widthMm() { return widthMm; }
+        public Double heightMm() { return heightMm; }
+
+        @Override public String type() { return "chart"; }
+    }
+
     // ------------------------------------------------------------------
     // Экземпляр
     // ------------------------------------------------------------------
@@ -975,10 +1023,15 @@ public final class ReportSpec {
                     if (el != null) {
                         body.add(el);
                     }
+                } else if ("chart".equals(type)) {
+                    BodyElement el = parseChart(e, i, problems, datasets);
+                    if (el != null) {
+                        body.add(el);
+                    }
                 } else {
                     problems.add("body[" + i + "].type «" + type
-                        + "»: на этом этапе поддерживаются «label», «table», «grid»,"
-                        + " «image» и «list»");
+                        + "»: поддерживаются «label», «table», «grid»,"
+                        + " «image», «list» и «chart»");
                 }
             }
         }
@@ -1292,6 +1345,108 @@ public final class ReportSpec {
             return null;
         }
         return new Image(base64, path, width, height, align);
+    }
+
+    /** Разбор chart: {kind, dataset, title, category, value, series, aggregate, ...}. */
+    private static BodyElement parseChart(Map<String, Object> e, int i,
+            List<String> problems, List<DataSet> datasets) {
+        String where = "body[" + i + "]";
+        checkUnknown(e, problems, where, "type", "kind", "dataset", "title",
+            "category", "value", "series", "aggregate", "width_mm", "height_mm");
+        String kind = strField(e, "kind", true, problems, where);
+        if (kind != null) {
+            kind = kind.toLowerCase(Locale.ROOT);
+            if (!CHART_KINDS.contains(kind)) {
+                problems.add(where + ".kind «" + kind + "»: допустимы " + CHART_KINDS);
+                kind = null;
+            }
+        }
+        String dataset = strField(e, "dataset", true, problems, where);
+        DataSet ds = dataset == null ? null : findDataSet(datasets, dataset);
+        if (dataset != null && ds == null) {
+            problems.add(where + ".dataset: набор «" + dataset + "» не описан в datasets");
+            dataset = null;
+        }
+        String title = strField(e, "title", false, problems, where);
+        if (title != null && title.length() > 200) {
+            problems.add(where + ".title длиннее 200 символов");
+        }
+        String category = chartColumn(e, "category", true, problems, where, ds, dataset);
+        String value = chartColumn(e, "value", true, problems, where, ds, dataset);
+        String series = chartColumn(e, "series", false, problems, where, ds, dataset);
+        if (series != null && "pie".equals(kind)) {
+            problems.add(where + ".series: для круговой диаграммы не задаётся");
+            series = null;
+        }
+        String aggregate = strField(e, "aggregate", false, problems, where);
+        if (aggregate != null) {
+            aggregate = aggregate.toLowerCase(Locale.ROOT);
+            if (!TOTALS.contains(aggregate)) {
+                problems.add(where + ".aggregate «" + aggregate
+                    + "»: допустимы " + TOTALS);
+                aggregate = null;
+            }
+        }
+        if (aggregate == null) {
+            aggregate = "sum";
+        }
+        Double width = null;
+        Object wRaw = e.get("width_mm");
+        if (wRaw != null) {
+            if (!(wRaw instanceof Number)) {
+                problems.add(where + ".width_mm должен быть числом");
+            } else {
+                double d = ((Number) wRaw).doubleValue();
+                if (d < 40 || d > 400) {
+                    problems.add(where + ".width_mm: допустимо 40–400 мм");
+                } else {
+                    width = Double.valueOf(d);
+                }
+            }
+        }
+        Double height = null;
+        Object hRaw = e.get("height_mm");
+        if (hRaw != null) {
+            if (!(hRaw instanceof Number)) {
+                problems.add(where + ".height_mm должен быть числом");
+            } else {
+                double d = ((Number) hRaw).doubleValue();
+                if (d < 30 || d > 400) {
+                    problems.add(where + ".height_mm: допустимо 30–400 мм");
+                } else {
+                    height = Double.valueOf(d);
+                }
+            }
+        }
+        if (width == null) {
+            width = Double.valueOf(160);
+        }
+        if (height == null) {
+            height = Double.valueOf(90);
+        }
+        if (kind == null || dataset == null || category == null || value == null) {
+            return null;
+        }
+        return new Chart(kind, dataset, title, category, value, series,
+            aggregate, width, height);
+    }
+
+    /** Колонка диаграммы: имя + наличие в наборе данных. */
+    private static String chartColumn(Map<String, Object> e, String key, boolean required,
+            List<String> problems, String where, DataSet ds, String dataset) {
+        String col = strField(e, key, required, problems, where);
+        if (col == null) {
+            return null;
+        }
+        if (!matchesName(col)) {
+            problems.add(where + "." + key + " «" + col + "»: недопустимое имя колонки");
+            return null;
+        }
+        if (ds != null && !ds.columns().isEmpty() && findDatasetColumn(ds, col) == null) {
+            problems.add(where + "." + key + ": колонка «" + col
+                + "» не описана в datasets." + dataset + ".columns");
+        }
+        return col;
     }
 
     /** Целое поле с проверкой диапазона. */
@@ -2242,6 +2397,26 @@ public final class ReportSpec {
                     im2.put("height_mm", im.heightMm());
                 }
                 bs.add(im2);
+            } else if (el instanceof Chart) {
+                Chart ch = (Chart) el;
+                Map<String, Object> cm = Json.obj();
+                cm.put("type", "chart");
+                cm.put("kind", ch.kind());
+                cm.put("dataset", ch.dataset());
+                if (ch.title() != null) {
+                    cm.put("title", ch.title());
+                }
+                cm.put("category", ch.category());
+                cm.put("value", ch.value());
+                if (ch.series() != null) {
+                    cm.put("series", ch.series());
+                }
+                if (!"sum".equals(ch.aggregate())) {
+                    cm.put("aggregate", ch.aggregate());
+                }
+                cm.put("width_mm", ch.widthMm());
+                cm.put("height_mm", ch.heightMm());
+                bs.add(cm);
             } else if (el instanceof ListElement) {
                 bs.add(listToJson((ListElement) el));
             }
@@ -2542,6 +2717,21 @@ public final class ReportSpec {
                 if (highlights > 0) {
                     sb.append("; условий оформления: ").append(highlights);
                 }
+            } else if (el instanceof Chart) {
+                Chart ch = (Chart) el;
+                sb.append("диаграмма ").append(chartKindRu(ch.kind()))
+                    .append(" (").append(ch.dataset()).append("): ")
+                    .append(ch.category()).append(" → ").append(ch.value());
+                if (ch.series() != null) {
+                    sb.append(", ряды: ").append(ch.series());
+                }
+                if (ch.title() != null) {
+                    sb.append(" «").append(ellipsis(ch.title(), 40)).append('»');
+                }
+            } else if (el instanceof Grid) {
+                sb.append("сетка ").append(((Grid) el).rows().size()).append(" строк");
+            } else if (el instanceof Image) {
+                sb.append("изображение");
             } else if (el instanceof ListElement) {
                 ListElement l = (ListElement) el;
                 sb.append("список ").append(l.columns().size()).append(" кол.");
@@ -2615,6 +2805,19 @@ public final class ReportSpec {
             return "логический";
         }
         return type;
+    }
+
+    private static String chartKindRu(String kind) {
+        if ("bar".equals(kind)) {
+            return "столбчатая";
+        }
+        if ("line".equals(kind)) {
+            return "линейная";
+        }
+        if ("pie".equals(kind)) {
+            return "круговая";
+        }
+        return kind;
     }
 
     private static String fmt(Double d) {

@@ -1,8 +1,8 @@
 # Проверка плагина
 
 Проверки разделены на автоматические (их можно повторять в любой момент) и
-ручные (GUI, выполняет пользователь). Ниже — состояние на 19.10.2026, версия
-плагина 0.4.0.
+ручные (GUI, выполняет пользователь). Ниже — состояние на 22.10.2026, версия
+плагина 0.7.0.
 
 ## 1. Автоматические проверки (офлайн)
 
@@ -19,13 +19,13 @@
 | `ChatHistoryTest` | история диалога: порядок ролей, системная инструкция, обрезка по объёму, очистка |
 | `AuditLogTest` | журнал аудита: формат JSONL, поля записи, дописывание, выключение |
 | `LlmClientTest` | клиент ИИ на заглушечном HTTP-сервере: успешный ответ, варианты `content`, ошибки 401/404/500, не-JSON ответ, пустой ответ, `finish_reason`, список моделей, недоступный сервер, адрес с завершающим слэшем |
-| `ReportSpecTest` | спецификация отчёта v0: разбор, проверки (неизвестные поля, имена, SQL, `?`↔`params`, колонки, параметры страницы), сводка, оборот `toJson`/`parse`, ответ модели в ограждении ```` ``` ```` и в тексте; расширения — стили, вычисляемые колонки, группировка, итоги (total/total_label), неверные значения |
-| `ReportBuilderTest` | сборка `.rptdesign` штатным Design API и повторное открытие моделью BIRT: мастер-страница, параметр отчёта, источник с паролем, набор с «?»-параметрами, кэш метаданных, привязки столбцов таблицы, перезапись файла; стили ячеек/шапки и надписей, вычисляемая колонка (через привязку), группа (ключ, заголовок, объединение, счётчик `Total.count()` по группе), итоги таблицы (`sum`, подпись, аргумент агрегата), чтение пароля из файла |
+| `ReportSpecTest` | спецификация отчёта v0: разбор, проверки (неизвестные поля, имена, SQL, `?`↔`params`, колонки, параметры страницы), сводка, оборот `toJson`/`parse`, ответ модели в ограждении ```` ``` ```` и в тексте; расширения — стили, вычисляемые колонки, группировка, итоги (total/total_label), sort/groups, grid, изображения, list, условия (highlight/filter), колонтитулы, диаграммы (bar/line/pie, агрегаты, series, лимиты размеров), неверные значения |
+| `ReportBuilderTest` | сборка `.rptdesign` штатным Design API и повторное открытие моделью BIRT: мастер-страница, параметр отчёта, источник с паролем, набор с «?»-параметрами, кэш метаданных, привязки столбцов таблицы, перезапись файла; стили ячеек/шапки и надписей, вычисляемая колонка (через привязку), группа (ключ, заголовок, объединение, счётчик `Total.count()` по группе), итоги таблицы (`sum`, подпись, аргумент агрегата), чтение пароля из файла; list (шапка/группы/итог), условия (`HighlightRule`/`FilterCondition`), колонтитулы (`<value-of>`), диаграмма (`extended-item` Chart, XML модели, `dataSet`, `boundDataColumns`, размер блока в точках, DejaVu Sans) |
 | `SpecDiffTest` | различия спецификаций для правки: одинаковые спеки, заголовок, надпись, добавленная/переименованная колонка, SQL, группировка |
 | `BuiltReportsTest` | кэш «отчёт → спецификация»: запоминание, поиск, заголовок и тело, устаревание при изменении файла, `forget`, отсутствующий файл |
 | `DbSchemaTest` | текст схемы БД: пометка «только метаданные», СУБД/база, число объектов, таблицы и представления, лимиты таблиц и колонок, отсутствие данных и SQL |
 
-Текущий результат: **275 проверок, ошибок 0** (JDK 8u504, Temurin;
+Текущий результат: **471 проверка, ошибок 0** (JDK 8u504, Temurin;
 заглушечный ИИ-сервер — `com.sun.net.httpserver`).
 
 ## 2. Приёмка M1 (чат с моделью) — выполнена 17.10.2026
@@ -45,44 +45,47 @@
 AIBIRT_TEST_DB_PASSWORD='…' ./releng/m2-selftest.sh
 ```
 
-Скрипт собирает **два** отчёта — базовый `students-by-house.spec.json` и
-`students-by-house-groups.spec.json` (группировка, стили, вычисляемая
-колонка), — рендерит PDF и HTML штатным движком BIRT, проверяет строки данных,
-кириллицу в PDF, отсутствие ошибок привязок колонок и читает схему БД
-(`DbSchemaTool`, только метаданные). Результат прогона 19.10.2026:
+Скрипт собирает **четыре** отчёта — базовый `students-by-house.spec.json`,
+группы `students-by-house-groups.spec.json`, условия и колонтитулы
+`students-conditions.spec.json`, сортировку и группы
+`students-sort-groups.spec.json` — рендерит PDF и HTML штатным движком BIRT,
+проверяет строки данных, кириллицу в PDF, отсутствие ошибок привязок колонок
+и читает схему БД (`DbSchemaTool`, только метаданные). Результат прогона
+22.10.2026:
 
 ```
 --- Спецификация: students-by-house.spec.json
 SELFTEST: SPEC OK name=students_by_house params=1 datasources=1 datasets=1 body=3
-SELFTEST: BUILD OK file=students_by_house.rptdesign bytes=12884
-SELFTEST: RENDER PDF OK bytes=43002
+SELFTEST: BUILD OK bytes=12884
+SELFTEST: RENDER PDF OK bytes=43001
 SELFTEST: RENDER HTML OK bytes=79413
-SELFTEST: LOG SEVERE=0
-SELFTEST: RESULT OK
-Строк данных в HTML: 160
-Данные в HTML: найдено «Гриффиндор»
-Страниц в PDF: 4
-Данные в PDF: найдено «Гриффиндор»
-PDF: есть встроенные шрифты
+SELFTEST: LOG SEVERE=0 → RESULT OK
 
 --- Спецификация: students-by-house-groups.spec.json
 SELFTEST: SPEC OK name=students_by_house_groups params=1 datasources=1 datasets=1 body=2
-SELFTEST: BUILD OK file=students_by_house_groups.rptdesign bytes=16739
-SELFTEST: RENDER PDF OK bytes=59431
+SELFTEST: BUILD OK bytes=16769
+SELFTEST: RENDER PDF OK bytes=59432
 SELFTEST: RENDER HTML OK bytes=87528
-SELFTEST: LOG SEVERE=0
-SELFTEST: RESULT OK
-Строк данных в HTML: 165
-Данные в HTML: найдено «Гриффиндор»
-Страниц в PDF: 5
-Данные в PDF: найдено «Гриффиндор»
-PDF: есть встроенные шрифты
+SELFTEST: LOG SEVERE=0 → RESULT OK
+
+--- Спецификация: students-conditions.spec.json (подсветка + фильтр + колонтитулы)
+SELFTEST: SPEC OK name=students_conditions params=0 datasources=1 datasets=1 body=2
+SELFTEST: BUILD OK bytes=13975
+SELFTEST: RENDER PDF OK bytes=42357
+SELFTEST: RENDER HTML OK bytes=60446
+SELFTEST: LOG SEVERE=0 → RESULT OK
+
+--- Спецификация: students-sort-groups.spec.json (сортировка + группы)
+SELFTEST: SPEC OK name=students_sort_groups params=0 datasources=1 datasets=1 body=2
+SELFTEST: BUILD OK bytes=13377
+SELFTEST: RENDER PDF OK bytes=44227
+SELFTEST: RENDER HTML OK bytes=64832
+SELFTEST: LOG SEVERE=0 → RESULT OK
 
 --- Схема БД (метаданные)
 Схема БД (только метаданные — без данных):
 СУБД: PostgreSQL 17.11, база hogwarts
 Таблиц и представлений: 39
-…
 Схема: таблица students найдена
 == Приёмка M2 пройдена ==
 ```
@@ -91,7 +94,9 @@ PDF: есть встроенные шрифты
 1 строка итогов; счётчики в подвалах групп проверены глазами: **41, 39, 40,
 40** (Гриффиндор, Люфен, Равенкл, Слизерин) — совпадает с данными базы.
 Колонка «Балл (курс × 10)» выводится построчно, итог — **6320** (сумма
-курсов × 10 по 160 студентам).
+курсов × 10 по 160 студентам). В отчёте с условиями подтверждены подсветка
+строк (`rgb(255, 213, 213)`) и фильтр (число строк уменьшилось), в PDF —
+колонтитулы «Стр. N из M».
 
 ### 3.2 Автоматическая приёмка внутри Eclipse (OSGi)
 
@@ -102,14 +107,14 @@ Headless-приложение плагина повторяет тот же ци
 xvfb-run -a /home/pka/eclipse/eclipse \
     -application com.aisql.birt.ui.aibirtSelftest -nosplash -consoleLog \
     -data /tmp/opencode/aibirt-eclipse-ws \
-    /home/pka/aisql-for-birt/tests/samples/students-by-house.spec.json \
-    /tmp/opencode/aibirt-eclipse-selftest
+    /home/pka/aisql-for-birt/tests/samples/students-by-house-groups.spec.json \
+    /tmp/opencode/aibirt-eclipse-groups
 ```
 
-Результат прогона 19.10.2026 (версия 0.4.0, групповая спецификация с итогами):
-`SPEC OK` → `BUILD OK (16739 байт)` → `RENDER PDF OK (59371 байт)` →
+Результат прогона 22.10.2026 (версия 0.7.0, групповая спецификация с итогами):
+`SPEC OK` → `BUILD OK (16769 байт)` → `RENDER PDF OK (59372 байта)` →
 `RENDER HTML OK (87528 байт)` → `LOG SEVERE=0` → `RESULT OK`, код выхода 0.
-Базовая спецификация в OSGi проверена так же (0.3.0: 12884/42941/79413). Журнал движка подтверждает подключение через
+Журнал движка подтверждает подключение через
 комплектную фабрику драйвера:
 
 ```
@@ -118,12 +123,47 @@ Found JDBC driverinfo extension: driverClass=org.postgresql.Driver,
 Created connection factory class com.aisql.birt.core.jdbc.PgJdbcConnectionFactory
 ```
 
-Маркер запуска в журнале: `AI BIRT UI plugin started, version 0.4.0`.
+Маркер запуска в журнале: `AI BIRT UI plugin started, version 0.7.0`.
 
-### 3.3 Ручной чек-лист (GUI, для пользователя)
+### 3.3 Диаграммы в Eclipse OSGi (0.7.0)
+
+Диаграммы нельзя рендерить standalone-движком (нет OSGi-обработчика набора
+данных), поэтому их приёмка — только внутри Eclipse:
+
+```bash
+AIBIRT_TEST_DB_PASSWORD='…' xvfb-run -a /home/pka/eclipse/eclipse \
+    -application com.aisql.birt.ui.aibirtSelftest -nosplash -consoleLog \
+    -data /tmp/opencode/aibirt-chart-ws \
+    /home/pka/aisql-for-birt/tests/samples/students-chart.spec.json \
+    /tmp/opencode/aibirt-chart-out
+```
+
+Спецификация `students-chart.spec.json` содержит четыре диаграммы:
+столбчатую, столбчатую с рядами (`series`), линейную и круговую. Результат
+прогона 22.10.2026:
+
+```
+SELFTEST: SPEC OK name=students_chart body=5
+SELFTEST: BUILD OK bytes=91442
+SELFTEST: RENDER PDF OK bytes=50045
+SELFTEST: RENDER HTML OK bytes=2923
+SELFTEST: LOG SEVERE=0 → RESULT OK (код 0)
+```
+
+В каталоге вывода появляются `images/custom1.svg` … `custom4.svg`; PDF
+содержит все четыре диаграммы: столбчатую, столбчатую с разбиением по
+`series` (с легендой), линейную и круговую; в SVG присутствуют подписи
+осей и легенды, кириллица выводится шрифтом DejaVu Sans. HTML-эмиттер
+выносит диаграммы в SVG-файлы рядом с HTML (каталог `images/`).
+
+Приёмка умеет рендерить и **готовый** `.rptdesign` (без спецификации): если
+второй аргумент заканчивается на `.rptdesign`, сборка пропускается —
+удобно для проверки отчётов из корпуса `own.rar`.
+
+### 3.4 Ручной чек-лист (GUI, для пользователя)
 
 1. **Запуск**: `/home/pka/eclipse/eclipse`; в `<workspace>/.metadata/.log`
-   должна быть строка `AI BIRT UI plugin started, version 0.4.0`,
+   должна быть строка `AI BIRT UI plugin started, version 0.7.0`,
    исключений нет.
 2. **Схема БД** (необязательно): «Схема БД…» → пароль `agent_user` →
    в поле ввода появляется список таблиц и колонок hogwarts; в модель уходят
@@ -200,10 +240,15 @@ Created connection factory class com.aisql.birt.core.jdbc.PgJdbcConnectionFactor
   доступен через Show View;
 - ответы модели зависят от загруженной модели на сервере — при первом запросе
   модель может загружаться в память (первый ответ дольше);
-- формат спецификации v0 намеренно узкий: надписи, таблицы, параметры, JDBC,
-  стили, вычисляемые колонки и одна группировка (см.
-  `docs/ADR-0001-report-spec-v0.md`, `docs/ADR-0002-edit-and-extensions.md`);
-  диаграммы, grid, несколько уровней группировки — следующие этапы;
+- формат спецификации v0 расширяется обратно совместимо: поддержаны
+  надписи, таблицы, list, grid, изображения, условия, колонтитулы и
+  диаграммы (см. `docs/ADR-0001-report-spec-v0.md`,
+  `docs/ADR-0002-edit-and-extensions.md`); пока не выражаются кросс-таблицы,
+  произвольные extended item и скрипты событий (исполнение Java — осознанно
+  выключено);
+- диаграммы рендерятся только в Eclipse OSGi: standalone-приёмка
+  `m2-selftest.sh` их не включает (нет OSGi-обработчика набора данных),
+  для диаграмм — `aibirtSelftest` под xvfb (см. 3.3);
 - в собранном отчёте пароль сохраняется в скрытом виде, как это делает сам
   дизайнер BIRT при сохранении пароля: это нужно для предпросмотра и запуска
   без повторного ввода пароля. Резервные копии `*.bak-*` содержат тот же

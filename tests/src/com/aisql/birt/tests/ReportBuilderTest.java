@@ -28,6 +28,7 @@ import org.eclipse.birt.report.model.api.ComputedColumnHandle;
 import org.eclipse.birt.report.model.api.DataItemHandle;
 import org.eclipse.birt.report.model.api.DesignConfig;
 import org.eclipse.birt.report.model.api.DesignEngine;
+import org.eclipse.birt.report.model.api.ExtendedItemHandle;
 import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
@@ -209,9 +210,29 @@ public final class ReportBuilderTest {
             + "}";
     }
 
+    /** Спецификация с диаграммой: категории и значения из набора данных. */
+    private static String chartSpecJson() {
+        return "{"
+            + " \"report\": { \"name\": \"students_chart\", \"title\": \"Диаграмма\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "                        \"driver\": \"org.postgresql.Driver\","
+            + "                        \"url\": \"jdbc:postgresql://127.0.0.1:5432/hogwarts\","
+            + "                        \"user\": \"agent_user\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsStudents\", \"datasource\": \"dsDB\","
+            + "                    \"sql\": \"select house_name, grade_level, enrollment_year from students\","
+            + "                    \"columns\": [ { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                                  { \"name\": \"grade_level\", \"type\": \"integer\" },"
+            + "                                  { \"name\": \"enrollment_year\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"chart\", \"kind\": \"bar\", \"dataset\": \"dsStudents\","
+            + "     \"title\": \"Средний балл по факультетам\", \"category\": \"house_name\","
+            + "     \"value\": \"grade_level\", \"series\": \"enrollment_year\", \"aggregate\": \"avg\","
+            + "     \"width_mm\": 180, \"height_mm\": 100 } ]"
+            + "}";
+    }
+
     public static void run() throws Exception {
         T.section("Сборка .rptdesign из спецификации");
-
         ReportSpec spec = ReportSpec.parse(specJson());
         File dir = Files.createTempDirectory("aibirt-build").toFile();
         File target = new File(dir, spec.name() + ".rptdesign");
@@ -613,6 +634,61 @@ public final class ReportBuilderTest {
             T.eq("Конец списка", fl.getText(), "список: элемент подвала из footer");
         } finally {
             lsSession.closeAll(false);
+        }
+
+        // --- Диаграмма (chart): XML модели, привязки и размер ---
+        ReportSpec cs = ReportSpec.parse(chartSpecJson());
+        File chartTarget = new File(dir, cs.name() + ".rptdesign");
+        ReportBuilder.build(cs, chartTarget, "");
+        String chartXml = new String(Files.readAllBytes(chartTarget.toPath()),
+            StandardCharsets.UTF_8);
+        T.check(chartXml.contains("<extended-item"), "диаграмма: расширенный элемент");
+        T.check(chartXml.contains("name=\"Chart\"") || chartXml.contains("extensionName")
+            || chartXml.contains("\"Chart\""), "диаграмма: тип Chart");
+        T.check(chartXml.contains("xmlRepresentation"), "диаграмма: XML модели записан");
+        T.check(chartXml.contains("Bar Chart"), "диаграмма: тип Bar Chart");
+        T.check(chartXml.contains("dataSetRow[&quot;house_name&quot;]")
+            || chartXml.contains("dataSetRow[\"house_name\"]"),
+            "диаграмма: привязка категории");
+        T.check(chartXml.contains("enrollment_year"),
+            "диаграмма: ряд по series");
+        int legendAt = chartXml.indexOf("layout:Legend");
+        int clientAt = legendAt < 0 ? -1 : chartXml.indexOf("<ClientArea>", legendAt);
+        T.check(legendAt >= 0 && clientAt > legendAt
+            && chartXml.substring(legendAt, clientAt).contains("<Visible>true</Visible>"),
+            "диаграмма: легенда видима при series");
+        SessionHandle csSession = new DesignEngine(new DesignConfig())
+            .newSessionHandle(ULocale.ENGLISH);
+        try {
+            ReportDesignHandle cd = csSession.openDesign(chartTarget.getAbsolutePath());
+            ExtendedItemHandle chart = (ExtendedItemHandle) cd.getBody().get(0);
+            T.eq("Chart", chart.getExtensionName(), "диаграмма: имя расширения Chart");
+            T.check(chart.getDataSet() != null
+                && "dsStudents".equals(chart.getDataSet().getName()),
+                "диаграмма: связана с набором данных");
+            T.check(chart.findColumnBinding("house_name") != null,
+                "диаграмма: привязка категории в модели");
+            T.check(chart.findColumnBinding("grade_level") != null,
+                "диаграмма: привязка значения в модели");
+            T.check(chart.findColumnBinding("enrollment_year") != null,
+                "диаграмма: привязка ряда в модели");
+            String rep = chart.getPropertyHandle("xmlRepresentation").getStringValue();
+            T.check(rep != null && rep.contains("Bar Chart"),
+                "диаграмма: модель диаграммы внутри элемента");
+            T.check(rep != null && rep.contains("Average"),
+                "диаграмма: агрегат Average");
+            T.check(rep != null && rep.contains("DejaVu Sans"),
+                "диаграмма: шрифт кириллицы");
+            T.check(rep != null && rep.contains("<Width>510.23"),
+                "диаграмма: ширина блока в точках");
+            T.check(rep != null && rep.contains("<Height>283.46"),
+                "диаграмма: высота блока в точках");
+            T.eq("180mm", chart.getPropertyHandle("width").getStringValue(),
+                "диаграмма: ширина");
+            T.eq("100mm", chart.getPropertyHandle("height").getStringValue(),
+                "диаграмма: высота");
+        } finally {
+            csSession.closeAll(false);
         }
 
         // Пустая спецификация не принимается.

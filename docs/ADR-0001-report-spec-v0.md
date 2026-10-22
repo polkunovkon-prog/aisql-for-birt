@@ -1,6 +1,7 @@
 # ADR-0001: формат спецификации отчёта v0
 
-- **Статус:** принято (18.10.2026), реализовано в M2-MVP
+- **Статус:** принято (18.10.2026), реализовано в M2-MVP; расширено обратно
+  совместимо в 0.3.0–0.7.0
 - **Контекст:** плагин «ИИ-конструктор отчётов» для BIRT 4.7
 
 ## Проблема
@@ -41,6 +42,8 @@
 | `report.page.format` | string | `A4`, `A3`, `A5`, `Letter`, `Legal`, `Ledger` (можно не задавать) |
 | `report.page.orientation` | string | `portrait` (по умолчанию) или `landscape` |
 | `report.page.margins_mm` | object | `top`, `right`, `bottom`, `left` — числа 5–100 |
+| `report.page.header`, `footer` | string | колонтитулы с `{page}`, `{pages}`, `{title}`, `{date}` (0.7.0) |
+| `report.page.show_header_on_first`, `show_footer_on_last` | boolean | показ на первой/последней странице |
 | `parameters[].name` | string | имя параметра (латиница/цифры/`_`) |
 | `parameters[].type` | string | `string`, `integer`, `decimal`, `date`, `datetime`, `boolean` |
 | `parameters[].prompt` | string | подпись в диалоге параметров |
@@ -56,7 +59,7 @@
 | `datasets[].sql` | string | один запрос `SELECT`/`WITH`; `?` — параметры, порядок = `params` |
 | `datasets[].params[]` | string[] | имя параметра отчёта на каждый `?` (по порядку) |
 | `datasets[].columns[]` | array | `{name, type}` — колонки результата (`string`, `integer`, `decimal`, `date`, …) |
-| `body[].type` | string | `label` или `table` |
+| `body[].type` | string | `label`, `table`, `list`, `grid`, `image` или `chart` |
 | `label.text` | string | текст надписи (до 500 символов) |
 | `label.size_pt` | number | размер шрифта, 6–72 |
 | `label.bold` | boolean | жирный |
@@ -67,6 +70,14 @@
 | `table.columns[].width_mm` | number | ширина, 5–300 мм |
 | `table.columns[].align` | string | выравнивание ячейки |
 | `table.columns[].type` | string | тип данных колонки (подсказка для отчёта) |
+| `table.groups[]` | array | до 5 уровней: `expr`, `title`, `count` (0.6.0) |
+| `table.sort` | object/array | `expr` + `direction` (`asc`/`desc`) — один или несколько ключей (0.6.0) |
+| `table.highlight[]` | array | `when`, `color`, `background`, `bold`, `italic` (0.7.0) |
+| `table.filter` | string | условие строки — JS-выражение (`row["…"] >= 0`), оператор `is-true` (0.7.0) |
+| `list` | object | `dataset`, `columns`, `header` (шапка), `footer`, `groups`, `sort`, `total_label` (0.7.0) |
+| `grid` | object | `column_widths_mm`, `rows[].cells[]` (`type`/`text`/`expr`/`dataset`/`col_span`/`row_span`); вложенные элементы (0.5.0) |
+| `image` | object | `path` (файл PNG) или `base64`, `width_mm`, `height_mm` (0.5.0) |
+| `chart` | object | `kind` (`bar`/`line`/`pie`), `dataset`, `category`, `value`, `series`, `aggregate`, `title`, `width_mm`, `height_mm` (0.7.0) |
 
 Ограничения-количества: источников ≤ 5, наборов ≤ 20, параметров ≤ 20,
 элементов `body` ≤ 60, колонок таблицы ≤ 30, длина SQL ≤ 20 000 символов.
@@ -100,10 +111,10 @@ JDBC-источник на `jdbc:postgresql://127.0.0.1:5432/hogwarts`, один
 
 ## Последствия
 
-- набор выразительных средств v0 намеренно узкий (надписи, таблицы,
-  параметры, JDBC); расширение — через версии формата (`v1`, …).
-  Часть расширений добавлена **обратно совместимо** внутри v0 в 0.3.0 —
-  стили, вычисляемые колонки и одна группировка таблицы
+- словарь выразительных средств вырос обратно совместимо внутри v0:
+  стили, вычисляемые колонки и итоги (0.3.0–0.4.0), grid и изображения
+  (0.5.0), сортировка и до 5 уровней группировки (0.6.0), list, условия,
+  колонтитулы, любая СУБД и диаграммы (0.7.0)
   (`docs/ADR-0002-edit-and-extensions.md`);
 - спецификацию можно посмотреть и сохранить (она маскирует пароль как `***`);
 - данные из БД и пароль в модель не передаются: модель получает только текст

@@ -341,6 +341,72 @@ public final class ReportSpecTest {
 
         // 11. Список (list)
         listSpecTests();
+
+        // 12. Диаграммы (chart)
+        chartSpecTests();
+    }
+
+    private static void chartSpecTests() throws Exception {
+        String chart = "{"
+            + " \"report\": { \"name\": \"cht\", \"title\": \"Диаграммы\" },"
+            + " \"datasources\": [ { \"name\": \"dsDB\", \"kind\": \"jdbc\","
+            + "   \"driver\": \"org.postgresql.Driver\", \"url\": \"jdbc:postgresql://h/db\","
+            + "   \"user\": \"u\" } ],"
+            + " \"datasets\": [ { \"name\": \"dsA\", \"datasource\": \"dsDB\","
+            + "   \"sql\": \"select house_name, avg_grade, students from grades\","
+            + "   \"columns\": [ { \"name\": \"house_name\", \"type\": \"string\" },"
+            + "                 { \"name\": \"avg_grade\", \"type\": \"decimal\" },"
+            + "                 { \"name\": \"students\", \"type\": \"integer\" } ] } ],"
+            + " \"body\": ["
+            + "   { \"type\": \"chart\", \"kind\": \"bar\", \"dataset\": \"dsA\","
+            + "     \"title\": \"Средний балл\", \"category\": \"house_name\","
+            + "     \"value\": \"avg_grade\", \"series\": \"students\", \"aggregate\": \"avg\","
+            + "     \"width_mm\": 180, \"height_mm\": 100 },"
+            + "   { \"type\": \"chart\", \"kind\": \"pie\", \"dataset\": \"dsA\","
+            + "     \"category\": \"house_name\", \"value\": \"students\" } ]"
+            + "}";
+        ReportSpec cs = ReportSpec.parse(chart);
+        T.eq(2, cs.body().size(), "диаграммы: два элемента");
+        ReportSpec.Chart bar = (ReportSpec.Chart) cs.body().get(0);
+        T.eq("bar", bar.kind(), "диаграмма: вид bar");
+        T.eq("dsA", bar.dataset(), "диаграмма: набор данных");
+        T.eq("Средний балл", bar.title(), "диаграмма: заголовок");
+        T.eq("house_name", bar.category(), "диаграмма: категория");
+        T.eq("avg_grade", bar.value(), "диаграмма: значение");
+        T.eq("students", bar.series(), "диаграмма: ряды");
+        T.eq("avg", bar.aggregate(), "диаграмма: агрегат");
+        T.eq(180.0, bar.widthMm(), "диаграмма: ширина");
+        T.eq(100.0, bar.heightMm(), "диаграмма: высота");
+        ReportSpec.Chart pie = (ReportSpec.Chart) cs.body().get(1);
+        T.eq("pie", pie.kind(), "диаграмма: вид pie");
+        T.eq("sum", pie.aggregate(), "диаграмма: агрегат по умолчанию");
+        T.eq(160.0, pie.widthMm(), "диаграмма: ширина по умолчанию");
+        T.eq(90.0, pie.heightMm(), "диаграмма: высота по умолчанию");
+        T.check(cs.summary().contains("диаграмма"), "сводка: диаграмма упомянута");
+        T.check(cs.summary().contains("столбчатая"), "сводка: вид диаграммы");
+        T.check(cs.summary().contains("круговая"), "сводка: круговая диаграмма");
+
+        // Оборот JSON.
+        ReportSpec csAgain = ReportSpec.parse(cs.toJson());
+        T.eq(2, csAgain.body().size(), "оборот: число диаграмм");
+        ReportSpec.Chart bar2 = (ReportSpec.Chart) csAgain.body().get(0);
+        T.eq("avg", bar2.aggregate(), "оборот: агрегат");
+        T.eq(180.0, bar2.widthMm(), "оборот: ширина");
+        T.eq("students", bar2.series(), "оборот: ряды");
+
+        // Ошибки.
+        expectProblems(chart.replace("\"kind\": \"bar\"", "\"kind\": \"глобус\""), "допустимы");
+        expectProblems(chart.replace("\"value\": \"avg_grade\"", "\"value\": \"ghost\""),
+            "не описана");
+        expectProblems(chart.replace("\"aggregate\": \"avg\"", "\"aggregate\": \"median\""),
+            "допустимы");
+        expectProblems(chart.replace("\"width_mm\": 180", "\"width_mm\": 10"), "допустимо 40–400");
+        expectProblems(chart.replace("\"kind\": \"pie\", \"dataset\": \"dsA\",",
+            "\"kind\": \"pie\", \"dataset\": \"dsA\", \"series\": \"students\","), "не задаётся");
+        expectProblems(chart.replace("\"title\": \"Средний балл\",",
+            "\"title\": \"x\", \"стиль\": 1,"), "неизвестное поле");
+        expectProblems(chart.replace("\"type\": \"chart\"", "\"type\": \"3d-chart\""),
+            "поддерживаются");
     }
 
     private static void listSpecTests() throws Exception {

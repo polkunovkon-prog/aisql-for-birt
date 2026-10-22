@@ -35,6 +35,7 @@ import org.eclipse.birt.report.model.api.DesignEngine;
 import org.eclipse.birt.report.model.api.ElementFactory;
 import org.eclipse.birt.report.model.api.Expression;
 import org.eclipse.birt.report.model.api.ExpressionType;
+import org.eclipse.birt.report.model.api.ExtendedItemHandle;
 import org.eclipse.birt.report.model.api.GridHandle;
 import org.eclipse.birt.report.model.api.ImageHandle;
 import org.eclipse.birt.report.model.api.LabelHandle;
@@ -477,6 +478,7 @@ public final class ReportBuilder {
         int gridIndex = 0;
         int imageIndex = 0;
         int listIndex = 0;
+        int chartIndex = 0;
         for (ReportSpec.BodyElement el : spec.body()) {
             if (el instanceof ReportSpec.Label) {
                 labelIndex++;
@@ -498,6 +500,10 @@ public final class ReportBuilder {
                 listIndex++;
                 design.getBody().add(createList(design, factory, spec,
                     (ReportSpec.ListElement) el, "list_" + listIndex));
+            } else if (el instanceof ReportSpec.Chart) {
+                chartIndex++;
+                design.getBody().add(createChart(design, factory, spec,
+                    (ReportSpec.Chart) el, "chart_" + chartIndex));
             }
         }
     }
@@ -610,6 +616,50 @@ public final class ReportBuilder {
             handle.setHeight(String.valueOf(el.heightMm()) + "mm");
         }
         return handle;
+    }
+
+    /**
+     * Диаграмма: расширенный элемент «Chart»; внутрь передаётся модель
+     * диаграммы (при сохранении она попадает в xmlRepresentation) и привязки
+     * колонок набора данных. Без boundDataColumns движок не находит
+     * row["..."], и диаграмма пустая.
+     */
+    private static ExtendedItemHandle createChart(ReportDesignHandle design,
+            ElementFactory factory, ReportSpec spec, ReportSpec.Chart el, String name)
+            throws Exception {
+        ExtendedItemHandle item = factory.newExtendedItem(name, "Chart");
+        item.setWidth(String.valueOf(el.widthMm()) + "mm");
+        item.setHeight(String.valueOf(el.heightMm()) + "mm");
+        item.setDataSet(dataSetHandle(design, el.dataset()));
+
+        // Типы колонок набора: без dataType движок не приводит значения
+        // к числу, и ряд диаграммы остаётся пустым.
+        Map<String, String> types = new HashMap<String, String>();
+        for (ReportSpec.DataSet ds : spec.datasets()) {
+            if (ds.name().equals(el.dataset())) {
+                for (ReportSpec.DatasetColumn c : ds.columns()) {
+                    types.put(c.name(), c.type());
+                }
+            }
+        }
+        Set<String> refs = new LinkedHashSet<String>();
+        refs.add(el.category());
+        refs.add(el.value());
+        if (el.series() != null) {
+            refs.add(el.series());
+        }
+        PropertyHandle bound = item.getPropertyHandle("boundDataColumns");
+        for (String ref : refs) {
+            ComputedColumn cc = new ComputedColumn();
+            cc.setName(ref);
+            cc.setDisplayName(ref);
+            cc.setExpression("dataSetRow[\"" + ref + "\"]");
+            String type = types.get(ref);
+            cc.setDataType(type == null ? DesignChoiceConstants.COLUMN_DATA_TYPE_STRING : type);
+            bound.addItem(cc);
+        }
+        ChartFactory.attach(item, el);
+        return item;
     }
 
     private static LabelHandle createLabel(ElementFactory factory, ReportSpec.Label el, String name)

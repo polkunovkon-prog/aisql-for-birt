@@ -34,6 +34,11 @@ public class AiBirtSelftestApplication implements IApplication {
             code = 2;
         }
         System.out.println("SELFTEST(ECLIPSE): код выхода " + code);
+        // Headless-приёмка: движок диаграмм оставляет не-daemon потоки,
+        // из-за которых Eclipse не завершается сам. Это тестовое приложение,
+        // поэтому завершаем процесс явно (отчёты и журналы уже закрыты).
+        System.out.flush();
+        System.exit(code);
         return Integer.valueOf(code);
     }
 

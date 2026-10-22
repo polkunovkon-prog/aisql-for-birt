@@ -1,0 +1,34 @@
+{
+  "report": { "name": "students_chart", "title": "Студенты: диаграммы по факультетам" },
+  "datasources": [
+    { "name": "dsDB", "kind": "jdbc", "driver": "org.postgresql.Driver",
+      "url": "jdbc:postgresql://127.0.0.1:5432/hogwarts", "user": "agent_user" }
+  ],
+  "datasets": [
+    { "name": "dsByHouse", "datasource": "dsDB",
+      "sql": "select h.name as house_name, count(*) as students from students s join houses h on h.id = s.house_id group by h.name order by h.name",
+      "columns": [ { "name": "house_name", "type": "string" },
+                   { "name": "students", "type": "integer" } ] },
+    { "name": "dsByHouseYear", "datasource": "dsDB",
+      "sql": "select h.name as house_name, s.enrollment_year as enrollment_year, count(*) as students from students s join houses h on h.id = s.house_id where s.enrollment_year is not null group by h.name, s.enrollment_year order by h.name, s.enrollment_year",
+      "columns": [ { "name": "house_name", "type": "string" },
+                   { "name": "enrollment_year", "type": "integer" },
+                   { "name": "students", "type": "integer" } ] }
+  ],
+  "body": [
+    { "type": "label", "text": "Студенты по факультетам", "size_pt": 14, "bold": true, "align": "center" },
+    { "type": "chart", "kind": "bar", "dataset": "dsByHouse",
+      "title": "Студентов на факультете", "category": "house_name",
+      "value": "students", "aggregate": "sum", "width_mm": 160, "height_mm": 90 },
+    { "type": "chart", "kind": "bar", "dataset": "dsByHouseYear",
+      "title": "Поступление по годам", "category": "house_name",
+      "value": "students", "series": "enrollment_year", "aggregate": "sum",
+      "width_mm": 160, "height_mm": 90 },
+    { "type": "chart", "kind": "line", "dataset": "dsByHouse",
+      "title": "Студенты: линейная диаграмма", "category": "house_name",
+      "value": "students", "aggregate": "sum", "width_mm": 160, "height_mm": 70 },
+    { "type": "chart", "kind": "pie", "dataset": "dsByHouse",
+      "title": "Доля факультетов", "category": "house_name",
+      "value": "students", "aggregate": "sum", "width_mm": 140, "height_mm": 90 }
+  ]
+}

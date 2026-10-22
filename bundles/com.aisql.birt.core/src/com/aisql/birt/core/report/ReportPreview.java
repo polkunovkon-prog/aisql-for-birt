@@ -105,6 +105,15 @@ public final class ReportPreview {
             if ("html".equals(format)) {
                 HTMLRenderOption html = new HTMLRenderOption();
                 html.setEmbeddable(false);
+                // Диаграммы и изображения HTML-эмиттер выносит в файлы:
+                // без каталога картинок он молча оставляет пустые блоки.
+                File imgDir = new File(out.getAbsoluteFile().getParentFile(), "images");
+                if (!imgDir.isDirectory() && !imgDir.mkdirs()) {
+                    throw new ReportBuilder.ReportBuildException(
+                        "не удалось создать каталог изображений " + imgDir);
+                }
+                html.setImageDirectory(imgDir.getAbsolutePath());
+                html.setBaseImageURL("images");
                 options = html;
             } else {
                 options = new PDFRenderOption();
