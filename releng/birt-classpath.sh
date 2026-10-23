@@ -44,6 +44,9 @@ JARS=(
     'org.eclipse.birt.report.engine.emitter.config.html_*.jar'
     'org.eclipse.birt.report.engine.script.javascript_*.jar'
     # BIRT: диаграммы (модель Chart API, расширение отчёта, EMF)
+    'org.eclipse.birt.chart.device.extension_*.jar'
+    'org.eclipse.birt.chart.device.svg_*.jar'
+    'org.eclipse.birt.chart.device.pdf_*.jar'
     'org.eclipse.birt.chart.engine_*.jar'
     'org.eclipse.birt.chart.engine.extension_*.jar'
     'org.eclipse.birt.chart.reportitem_*.jar'

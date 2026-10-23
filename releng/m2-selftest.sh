@@ -141,7 +141,10 @@ check_spec() {
     if command -v pdftotext >/dev/null 2>&1; then
         pdftxt="$(pdftotext -layout "$pdf" - 2>/dev/null || true)"
         for token in $EXPECT; do
-            if printf '%s' "$pdftxt" | grep -q "$token"; then
+            # Здесь именно grep-строка (а не printf): pdftotext отделяет
+            # кириллицу от ASCII неразрывными пробелами, и вывод из
+            # $(...) теряет их при передаче через printf.
+            if grep -q "$token" <<<"$pdftxt"; then
                 echo "Данные в PDF: найдено «$token»"
             else
                 echo "ОШИБКА: в PDF нет «$token» (шрифт не встроен, кириллица теряется?) ($name)" >&2

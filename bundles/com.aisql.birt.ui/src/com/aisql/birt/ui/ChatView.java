@@ -94,6 +94,9 @@ public class ChatView extends ViewPart {
     /** Пониженная температура для генерации спецификации: нужен строгий JSON. */
     private static final double SPEC_TEMPERATURE = 0.2d;
 
+    /** Сколько раз просить модель исправить спецификацию по ошибкам валидатора. */
+    private static final int SPEC_ATTEMPTS = 3;
+
     /** Идентификатор редактора отчётов BIRT (для открытия файлов вне рабочей области). */
     private static final String REPORT_EDITOR_ID =
         "org.eclipse.birt.report.designer.ui.editors.ReportEditor";
@@ -429,9 +432,28 @@ public class ChatView extends ViewPart {
             protected IStatus run(IProgressMonitor monitor) {
                 long started = System.currentTimeMillis();
                 try {
-                    String reply = client.chat(apiMessages, SPEC_TEMPERATURE, maxTokens);
+                    String reply = null;
+                    ReportSpec spec = null;
+                    // Петля самокоррекции: если валидатор отклонил спецификацию,
+                    // отдаём модели её же JSON и список ошибок — до 3 попыток.
+                    for (int attempt = 1; attempt <= SPEC_ATTEMPTS; attempt++) {
+                        reply = client.chat(apiMessages, SPEC_TEMPERATURE, maxTokens);
+                        try {
+                            spec = ReportSpec.fromLlmReply(reply);
+                            break;
+                        } catch (ReportSpec.SpecException se) {
+                            if (attempt >= SPEC_ATTEMPTS) {
+                                throw se;
+                            }
+                            apiMessages.add(ChatMessage.assistant(reply));
+                            apiMessages.add(ChatMessage.user(
+                                SpecPrompts.repairMessage(se.problems())));
+                            uiAppend("Самокоррекция " + attempt + "/" + (SPEC_ATTEMPTS - 1) + ":",
+                                "модель исправляет " + se.problems().size()
+                                    + " ошибк(и) спецификации…", false);
+                        }
+                    }
                     long ms = System.currentTimeMillis() - started;
-                    ReportSpec spec = ReportSpec.fromLlmReply(reply);
                     pendingSpec = spec;
                     AuditLog.append("report", "spec", "OK", ms, model, null,
                         "имя=" + spec.name() + "; ответ=" + reply.length() + " симв.");

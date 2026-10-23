@@ -108,6 +108,12 @@ final class ChartFactory {
         }
         Series values = bar ? BarSeriesImpl.create() : LineSeriesImpl.create();
         values.getDataDefinition().add(valueQuery(c));
+        if (c.series() != null) {
+            // Подпись ряда в легенде: выражение поля, а не имя колонки —
+            // BIRT подставляет значение и рисует текст в легенде.
+            values.getLabel().getCaption().setValue(c.series());
+            values.getLabel().setVisible(true);
+        }
         sdY.getSeries().add(values);
         applyFonts(chart);
         applySize(chart, c);
@@ -169,7 +175,15 @@ final class ChartFactory {
         return "Sum";
     }
 
-    /** Выражение привязки колонки (row["..."], как в конструкторе BIRT). */
+    /**
+     * Выражение привязки колонки.
+     *
+     * В расширенном элементе «Chart» ссылки row["..."] разрешаются только по
+     * boundDataColumns самого элемента, а они строятся как
+     * dataSetRow["колонка"] (см. ReportBuilder.createChart). Поэтому
+     * диаграмма обязана ссылаться на dataSetRow: с row["..."] движок падает
+     * с «Invalid field name» на колонках, которых нет среди привязок.
+     */
     private static String column(String name) {
         return "row[\"" + name + "\"]";
     }

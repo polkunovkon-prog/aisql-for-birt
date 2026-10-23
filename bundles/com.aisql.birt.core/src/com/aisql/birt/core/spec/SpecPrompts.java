@@ -154,4 +154,20 @@ public final class SpecPrompts {
             + "\n\nЗамечание пользователя:\n" + remark
             + "\n\nВерни полную обновлённую JSON-спецификацию формата v0.";
     }
+
+    /**
+     * Сообщение самокоррекции: валидатор отклонил спецификацию, перечисляем
+     * ошибки и требуем вернуть исправленный JSON целиком.
+     */
+    public static String repairMessage(java.util.List<String> problems) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Валидатор отклонил твою спецификацию. Ошибки:\n");
+        for (String p : problems) {
+            sb.append("- ").append(p).append('\n');
+        }
+        sb.append("\nИсправь РОВНО эти ошибки, не меняя остального. Верни ТОЛЬКО полный ")
+          .append("исправленный JSON-объект спецификации формата v0 — без markdown, ")
+          .append("без пояснений.");
+        return sb.toString();
+    }
 }
