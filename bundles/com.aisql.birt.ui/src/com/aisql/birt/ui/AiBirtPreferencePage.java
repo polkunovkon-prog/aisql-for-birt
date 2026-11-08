@@ -6,12 +6,21 @@
  * вручную, копировать и сопровождать в диагностике. Кнопка «Проверить
  * соединение» обращается к серверу и показывает список моделей.
  *
+ * Раздел «Защита» (ADR-0004): режим защиты от инъекций, маскирование ПДн,
+ * выгрузка аудита в syslog (SIEM) с тестом, проверка целостности журнала
+ * (цепочка хэшей). Поля, закреплённые политикой предприятия, заблокированы
+ * и помечены.
+ *
  * Лицензия: Apache-2.0
  */
 package com.aisql.birt.ui;
 
+import com.aisql.birt.core.AuditLog;
 import com.aisql.birt.core.BirtSettings;
 import com.aisql.birt.core.LlmClient;
+import com.aisql.birt.core.security.AuditSyslog;
+import com.aisql.birt.core.security.BirtEnterprisePolicy;
+import com.aisql.birt.core.security.PromptInjectionDefense;
 
 import java.io.IOException;
 import java.util.List;
@@ -29,8 +38,10 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.layout.RowLayout;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IWorkbench;
@@ -50,6 +61,18 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
     private Text systemPromptText;
     private Button auditCheck;
     private Label checkResultLabel;
+
+    // Раздел «Защита»
+    private Combo injectionCombo;
+    private Button piiMaskingCheck;
+    private Combo agentModeCombo;
+    private Text agentIterationsText;
+    private Combo nativeToolsCombo;
+    private Button syslogCheck;
+    private Text syslogHostText;
+    private Text syslogPortText;
+    private Label syslogStatusLabel;
+    private Label auditVerifyLabel;
 
     public AiBirtPreferencePage() {
         setTitle("ИИ-конструктор отчётов (BIRT)");
@@ -78,7 +101,7 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
 
         new Label(composite, SWT.NONE);
         auditCheck = new Button(composite, SWT.CHECK);
-        auditCheck.setText("Вести журнал аудита (ai-birt-audit.jsonl)");
+        auditCheck.setText("Вести журнал аудита (ai-birt-audit.jsonl, цепочка хэшей)");
 
         Label promptLabel = new Label(composite, SWT.NONE);
         promptLabel.setText("Системная инструкция чата:");
@@ -88,6 +111,9 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
         GridData promptData = new GridData(SWT.FILL, SWT.FILL, true, true);
         promptData.heightHint = 96;
         systemPromptText.setLayoutData(promptData);
+
+        createAgentSection(composite);
+        createSecuritySection(composite);
 
         Label separator = new Label(composite, SWT.SEPARATOR | SWT.HORIZONTAL);
         GridData separatorData = new GridData(SWT.FILL, SWT.CENTER, true, false);
@@ -121,6 +147,146 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
         return composite;
     }
 
+    // ------------------------------------------------------------------
+    // Раздел «Агент»
+    // ------------------------------------------------------------------
+
+    private void createAgentSection(Composite parent) {
+        Group group = new Group(parent, SWT.NONE);
+        group.setText("Агентная сборка (инструменты)");
+        GridLayout gl = new GridLayout(2, false);
+        gl.marginWidth = 8;
+        gl.marginHeight = 8;
+        group.setLayout(gl);
+        GridData gd = new GridData(SWT.FILL, SWT.CENTER, true, false);
+        gd.horizontalSpan = 2;
+        group.setLayoutData(gd);
+
+        new Label(group, SWT.NONE).setText("Режим сборки по умолчанию:");
+        agentModeCombo = new Combo(group, SWT.READ_ONLY);
+        agentModeCombo.add("agent — пошагово инструментами (рекомендуется)");
+        agentModeCombo.add("spec — спецификация v0 одним JSON");
+        agentModeCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
+        new Label(group, SWT.NONE).setText("Лимит итераций агента:");
+        agentIterationsText = new Text(group, SWT.BORDER | SWT.SINGLE);
+        agentIterationsText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        int ceiling = BirtEnterprisePolicy.maxIterations(Integer.MAX_VALUE);
+        if (ceiling != Integer.MAX_VALUE) {
+            agentIterationsText.setEnabled(false);
+            agentIterationsText.setToolTipText("Ограничено политикой предприятия: " + ceiling);
+        }
+
+        new Label(group, SWT.NONE).setText("Протокол инструментов:");
+        nativeToolsCombo = new Combo(group, SWT.READ_ONLY);
+        nativeToolsCombo.add("auto — штатный tool calling, запасной текстовый");
+        nativeToolsCombo.add("on — только штатный tool calling");
+        nativeToolsCombo.add("off — только текстовый протокол (TOOL …)");
+        nativeToolsCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+    }
+
+    // ------------------------------------------------------------------
+    // Раздел «Защита»
+    // ------------------------------------------------------------------
+
+    private void createSecuritySection(Composite parent) {
+        Group group = new Group(parent, SWT.NONE);
+        group.setText("Защита");
+        GridLayout gl = new GridLayout(2, false);
+        gl.marginWidth = 8;
+        gl.marginHeight = 8;
+        group.setLayout(gl);
+        GridData gd = new GridData(SWT.FILL, SWT.CENTER, true, false);
+        gd.horizontalSpan = 2;
+        group.setLayoutData(gd);
+
+        // Статус политики
+        Label policyTitle = new Label(group, SWT.NONE);
+        policyTitle.setText("Политика предприятия:");
+        Label policyValue = new Label(group, SWT.WRAP);
+        policyValue.setText(BirtEnterprisePolicy.describe());
+        policyValue.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
+        new Label(group, SWT.NONE).setText("Защита от промпт-инъекций:");
+        injectionCombo = new Combo(group, SWT.READ_ONLY);
+        injectionCombo.add("off — только журнал");
+        injectionCombo.add("flag — помечать (по умолчанию)");
+        injectionCombo.add("strict — блокировать попытки угона");
+        injectionCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        if (BirtEnterprisePolicy.injectionMode() != null) {
+            injectionCombo.setEnabled(false);
+            injectionCombo.setToolTipText("Режим закреплён политикой предприятия");
+        }
+
+        new Label(group, SWT.NONE);
+        piiMaskingCheck = new Button(group, SWT.CHECK);
+        piiMaskingCheck.setText("Маскировать ПДн в тексте, уходящем в модель"
+            + " (email, телефоны, карты, ИНН, СНИЛС)");
+
+        new Label(group, SWT.NONE).setText("Журнал аудита → syslog (SIEM):");
+        Composite syslogRow = new Composite(group, SWT.NONE);
+        GridLayout srl = new GridLayout(4, false);
+        srl.marginWidth = 0;
+        srl.marginHeight = 0;
+        syslogRow.setLayout(srl);
+        syslogRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
+        syslogCheck = new Button(syslogRow, SWT.CHECK);
+        syslogCheck.setText("вкл");
+
+        new Label(syslogRow, SWT.NONE).setText("хост:");
+        syslogHostText = new Text(syslogRow, SWT.BORDER | SWT.SINGLE);
+        GridData hostData = new GridData(SWT.FILL, SWT.CENTER, true, false);
+        hostData.widthHint = 180;
+        syslogHostText.setLayoutData(hostData);
+
+        new Label(syslogRow, SWT.NONE).setText("порт:");
+        syslogPortText = new Text(syslogRow, SWT.BORDER | SWT.SINGLE);
+        syslogPortText.setText(String.valueOf(AuditSyslog.DEFAULT_PORT));
+        GridData portData = new GridData(SWT.CENTER, SWT.CENTER, false, false);
+        portData.widthHint = 70;
+        syslogPortText.setLayoutData(portData);
+
+        // Кнопки проверок
+        new Label(group, SWT.NONE);
+        Composite buttons = new Composite(group, SWT.NONE);
+        RowLayout rl = new RowLayout(SWT.HORIZONTAL);
+        rl.center = true;
+        rl.spacing = 8;
+        rl.marginWidth = 0;
+        rl.marginHeight = 0;
+        buttons.setLayout(rl);
+        buttons.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
+        Button syslogTest = new Button(buttons, SWT.PUSH);
+        syslogTest.setText("Проверить syslog");
+        syslogTest.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                testSyslog();
+            }
+        });
+
+        Button auditVerify = new Button(buttons, SWT.PUSH);
+        auditVerify.setText("Проверить целостность журнала");
+        auditVerify.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                verifyAudit();
+            }
+        });
+
+        new Label(group, SWT.NONE);
+        syslogStatusLabel = new Label(group, SWT.WRAP);
+        syslogStatusLabel.setText("");
+        syslogStatusLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
+        new Label(group, SWT.NONE);
+        auditVerifyLabel = new Label(group, SWT.WRAP);
+        auditVerifyLabel.setText("");
+        auditVerifyLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+    }
+
     private Text addTextRow(Composite composite, String labelText, int widthHint) {
         Label label = new Label(composite, SWT.NONE);
         label.setText(labelText);
@@ -144,6 +310,25 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
         maxTokensText.setText(String.valueOf(BirtSettings.maxTokens()));
         systemPromptText.setText(BirtSettings.systemPrompt());
         auditCheck.setSelection(BirtSettings.auditEnabled());
+        if (BirtEnterprisePolicy.auditLocked()) {
+            auditCheck.setSelection(true);
+            auditCheck.setEnabled(false);
+            auditCheck.setToolTipText("Журнал закреплён политикой предприятия");
+        }
+
+        agentModeCombo.select("spec".equals(BirtSettings.agentMode()) ? 1 : 0);
+        agentIterationsText.setText(String.valueOf(BirtSettings.agentMaxIterations()));
+        String nativeTools = BirtSettings.agentNativeTools();
+        nativeToolsCombo.select("on".equals(nativeTools) ? 1
+            : "off".equals(nativeTools) ? 2 : 0);
+
+        String mode = PromptInjectionDefense.mode();
+        injectionCombo.select(PromptInjectionDefense.MODE_OFF.equals(mode) ? 0
+            : PromptInjectionDefense.MODE_STRICT.equals(mode) ? 2 : 1);
+        piiMaskingCheck.setSelection(BirtEnterprisePolicy.piiMaskingEnabled());
+        syslogCheck.setSelection(AuditSyslog.enabled());
+        syslogHostText.setText(AuditSyslog.host());
+        syslogPortText.setText(String.valueOf(AuditSyslog.port()));
     }
 
     @Override
@@ -205,6 +390,28 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
             setErrorMessage("Ограничение ответа не может быть отрицательным.");
             return false;
         }
+        int iterations;
+        try {
+            iterations = Integer.parseInt(agentIterationsText.getText().trim());
+        } catch (NumberFormatException e) {
+            setErrorMessage("Лимит итераций должен быть целым числом.");
+            return false;
+        }
+        if (iterations <= 0) {
+            setErrorMessage("Лимит итераций должен быть больше нуля.");
+            return false;
+        }
+        int syslogPort;
+        try {
+            syslogPort = Integer.parseInt(syslogPortText.getText().trim());
+        } catch (NumberFormatException e) {
+            setErrorMessage("Порт syslog должен быть целым числом.");
+            return false;
+        }
+        if (syslogPort <= 0 || syslogPort > 65535) {
+            setErrorMessage("Порт syslog должен быть в диапазоне 1…65535.");
+            return false;
+        }
 
         // Сохраняем поверх текущего файла: незнакомые ключи не теряются.
         Properties properties = new Properties();
@@ -219,7 +426,28 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
         properties.setProperty(BirtSettings.KEY_TIMEOUT, String.valueOf(timeout));
         properties.setProperty(BirtSettings.KEY_MAX_TOKENS, String.valueOf(maxTokens));
         properties.setProperty(BirtSettings.KEY_SYSTEM_PROMPT, systemPromptText.getText().trim());
-        properties.setProperty(BirtSettings.KEY_AUDIT_ENABLED, String.valueOf(auditCheck.getSelection()));
+        properties.setProperty(BirtSettings.KEY_AUDIT_ENABLED,
+            BirtEnterprisePolicy.auditLocked()
+                ? "true" : String.valueOf(auditCheck.getSelection()));
+        properties.setProperty(BirtSettings.KEY_AGENT_MODE,
+            agentModeCombo.getSelectionIndex() == 1 ? "spec" : "agent");
+        properties.setProperty(BirtSettings.KEY_AGENT_MAX_ITERATIONS, String.valueOf(iterations));
+        properties.setProperty(BirtSettings.KEY_AGENT_NATIVE_TOOLS,
+            nativeToolsCombo.getSelectionIndex() == 1 ? "on"
+                : nativeToolsCombo.getSelectionIndex() == 2 ? "off" : "auto");
+        if (injectionCombo.getEnabled()) {
+            properties.setProperty(BirtSettings.KEY_INJECTION,
+                injectionCombo.getSelectionIndex() == 0 ? PromptInjectionDefense.MODE_OFF
+                    : injectionCombo.getSelectionIndex() == 2
+                        ? PromptInjectionDefense.MODE_STRICT
+                        : PromptInjectionDefense.MODE_FLAG);
+        }
+        properties.setProperty(BirtSettings.KEY_PII_MASKING,
+            String.valueOf(piiMaskingCheck.getSelection()));
+        properties.setProperty(BirtSettings.KEY_SYSLOG_ENABLED,
+            String.valueOf(syslogCheck.getSelection()));
+        properties.setProperty(BirtSettings.KEY_SYSLOG_HOST, syslogHostText.getText().trim());
+        properties.setProperty(BirtSettings.KEY_SYSLOG_PORT, String.valueOf(syslogPort));
 
         try {
             BirtSettings.save(properties);
@@ -280,21 +508,98 @@ public class AiBirtPreferencePage extends PreferencePage implements IWorkbenchPr
         job.schedule();
     }
 
-    private void setCheckResult(final String text, final boolean error) {
-        if (checkResultLabel == null || checkResultLabel.isDisposed()) {
+    // ------------------------------------------------------------------
+    // Проверки раздела «Защита»
+    // ------------------------------------------------------------------
+
+    /** Отправляет тестовое сообщение syslog (использует введённые значения). */
+    private void testSyslog() {
+        final String host = syslogHostText.getText().trim();
+        if (host.isEmpty()) {
+            setSyslogStatus("Укажите хост syslog (например, localhost или адрес SIEM).", true);
             return;
         }
-        checkResultLabel.getDisplay().asyncExec(new Runnable() {
+        final int port;
+        try {
+            port = Integer.parseInt(syslogPortText.getText().trim());
+        } catch (NumberFormatException e) {
+            setSyslogStatus("Порт syslog должен быть целым числом.", true);
+            return;
+        }
+        setSyslogStatus("Отправка тестового сообщения…", false);
+        Job job = new Job("Тест syslog") {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                // отправляем напрямую по введённым значениям
+                try {
+                    java.net.DatagramSocket socket = new java.net.DatagramSocket();
+                    try {
+                        String message = AuditSyslog.format(6, "AIBIRT",
+                            "[ai-birt@1 test=\"true\"]",
+                            "тестовое сообщение ai-birt (проверка настроек)");
+                        byte[] bytes = message.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        java.net.InetAddress address = java.net.InetAddress.getByName(host);
+                        socket.send(new java.net.DatagramPacket(bytes, bytes.length, address, port));
+                    } finally {
+                        socket.close();
+                    }
+                    AuditLog.append("syslog", "test", "OK", -1, null, null,
+                        "host=" + host + ":" + port);
+                    setSyslogStatus("Сообщение отправлено на " + host + ":" + port
+                        + ". Проверьте приём в SIEM/журнале сервера.", false);
+                } catch (final Exception e) {
+                    setSyslogStatus("Не удалось отправить: " + e.getMessage(), true);
+                }
+                return Status.OK_STATUS;
+            }
+        };
+        job.setUser(true);
+        job.schedule();
+    }
+
+    /** Проверяет целостность журнала аудита (цепочка хэшей). */
+    private void verifyAudit() {
+        Job job = new Job("Проверка журнала аудита") {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                final AuditLog.VerifyResult r = AuditLog.verifyChain();
+                AuditLog.append("audit", "verify", r.ok ? "OK" : "ERROR", -1, null, null,
+                    r.describe());
+                setAuditVerify(r.describe(), !r.ok);
+                return Status.OK_STATUS;
+            }
+        };
+        job.setUser(true);
+        job.schedule();
+    }
+
+    private void setCheckResult(final String text, final boolean error) {
+        setLabel(checkResultLabel, text, error);
+    }
+
+    private void setSyslogStatus(final String text, final boolean error) {
+        setLabel(syslogStatusLabel, text, error);
+    }
+
+    private void setAuditVerify(final String text, final boolean error) {
+        setLabel(auditVerifyLabel, text, error);
+    }
+
+    private static void setLabel(final Label label, final String text, final boolean error) {
+        if (label == null || label.isDisposed()) {
+            return;
+        }
+        label.getDisplay().asyncExec(new Runnable() {
             @Override
             public void run() {
-                if (checkResultLabel.isDisposed()) {
+                if (label.isDisposed()) {
                     return;
                 }
-                checkResultLabel.setText(text);
-                checkResultLabel.setForeground(error
-                    ? checkResultLabel.getDisplay().getSystemColor(SWT.COLOR_DARK_RED)
+                label.setText(text);
+                label.setForeground(error
+                    ? label.getDisplay().getSystemColor(SWT.COLOR_DARK_RED)
                     : null);
-                Composite parent = checkResultLabel.getParent();
+                Composite parent = label.getParent();
                 parent.layout(true);
             }
         });

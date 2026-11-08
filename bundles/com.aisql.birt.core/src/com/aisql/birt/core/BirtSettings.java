@@ -49,6 +49,19 @@ public final class BirtSettings {
     public static final String KEY_DB_USER = "db.user";
     public static final String KEY_DB_PASSWORD = "db.password";
 
+    /** Режим сборки по умолчанию: agent (инструменты) или spec (спецификация v0). */
+    public static final String KEY_AGENT_MODE = "agent.defaultMode";
+    /** Потолок итераций агентного цикла (может сузить политика). */
+    public static final String KEY_AGENT_MAX_ITERATIONS = "agent.maxIterations";
+    /** Протокол инструментов: auto|on|off (on — только штатный tool calling). */
+    public static final String KEY_AGENT_NATIVE_TOOLS = "agent.nativeTools";
+    public static final String KEY_INJECTION = "security.injection";
+    public static final String KEY_PII_MASKING = "security.piiMasking";
+    public static final String KEY_SYSLOG_ENABLED = "audit.syslog.enabled";
+    public static final String KEY_SYSLOG_HOST = "audit.syslog.host";
+    public static final String KEY_SYSLOG_PORT = "audit.syslog.port";
+    public static final String KEY_SYSLOG_APP = "audit.syslog.app";
+
     public static final String DEFAULT_BASE_URL = "http://192.168.100.152:8888/v1";
     public static final String DEFAULT_MODEL = "ornith-ai/Ornith-1.5-35B-A3B-GGUF";
     public static final String DEFAULT_TOKEN = "";
@@ -70,6 +83,9 @@ public final class BirtSettings {
         KEY_BASE_URL, KEY_MODEL, KEY_TOKEN, KEY_TEMPERATURE,
         KEY_TIMEOUT, KEY_MAX_TOKENS, KEY_AUDIT_ENABLED,
         KEY_DB_DRIVER, KEY_DB_URL, KEY_DB_USER, KEY_DB_PASSWORD,
+        KEY_AGENT_MODE, KEY_AGENT_MAX_ITERATIONS, KEY_AGENT_NATIVE_TOOLS,
+        KEY_INJECTION, KEY_PII_MASKING,
+        KEY_SYSLOG_ENABLED, KEY_SYSLOG_HOST, KEY_SYSLOG_PORT, KEY_SYSLOG_APP,
         KEY_SYSTEM_PROMPT);
 
     private static final Object LOCK = new Object();
@@ -220,6 +236,36 @@ public final class BirtSettings {
         return load().getProperty(KEY_DB_PASSWORD, "").trim();
     }
 
+    // ------------------------------------------------------------------
+    // Агент и защита (значение из файла, иначе — по умолчанию; политику
+    // предприятия применяют специализированные классы)
+    // ------------------------------------------------------------------
+
+    /** Произвольный ключ: значение из файла или значение по умолчанию. */
+    public static String value(String key, String def) {
+        String v = load().getProperty(key);
+        return v == null ? def : v;
+    }
+
+    /** Режим сборки по умолчанию: agent | spec. */
+    public static String agentMode() {
+        String v = load().getProperty(KEY_AGENT_MODE, "agent").trim().toLowerCase();
+        return "spec".equals(v) ? "spec" : "agent";
+    }
+
+    public static int agentMaxIterations() {
+        return parseInt(load().getProperty(KEY_AGENT_MAX_ITERATIONS), 24);
+    }
+
+    /** auto | on | off. */
+    public static String agentNativeTools() {
+        String v = load().getProperty(KEY_AGENT_NATIVE_TOOLS, "auto").trim().toLowerCase();
+        if ("on".equals(v) || "off".equals(v)) {
+            return v;
+        }
+        return "auto";
+    }
+
     private static double parseDouble(String v, double def) {
         if (v == null) {
             return def;
@@ -275,6 +321,12 @@ public final class BirtSettings {
         sb.append("# db.driver         — драйвер JDBC для чтения схемы БД (метаданные)\n");
         sb.append("# db.url/db.user    — подключение к базе для кнопки «Схема БД…»\n");
         sb.append("# db.password       — пароль базы (в модель не передаётся, в журнал не пишется)\n");
+        sb.append("# agent.defaultMode — режим сборки: agent (инструменты) | spec (спецификация v0)\n");
+        sb.append("# agent.maxIterations — потолок итераций агентного цикла (по умолчанию 24)\n");
+        sb.append("# agent.nativeTools — протокол инструментов: auto | on | off\n");
+        sb.append("# security.injection — защита от инъекций: off | flag | strict (по умолчанию flag)\n");
+        sb.append("# security.piiMasking — маскирование ПДн в уходящем тексте (true/false)\n");
+        sb.append("# audit.syslog.enabled/host/port/app — выгрузка аудита в SIEM по UDP\n");
         sb.append("\n");
 
         Set<String> ordered = new HashSet<String>(KEY_ORDER);

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  offline-tests:
+    name: Офлайн-тесты — BIRT ${{ matrix.birt }} / JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Легаси-линия: Eclipse Oxygen + BIRT 4.7, Java 8 (байт-код 8).
+          - birt: "4.7"
+            java: "8"
+            javac_opts: "-source 8 -target 8"
+          # Современная линия: BIRT 4.25 (2026), Java 21, байт-код 8 (--release).
+          - birt: "4.25"
+            java: "21"
+            javac_opts: "--release 8"
+    env:
+      BIRT_DIR: ${{ github.workspace }}/.birt-${{ matrix.birt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка JDK ${{ matrix.java }} (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Кэш BIRT ${{ matrix.birt }}
+        uses: actions/cache@v4
+        with:
+          path: .birt-${{ matrix.birt }}
+          key: birt-${{ matrix.birt }}-v1
+
+      - name: Загрузка jar-ов BIRT ${{ matrix.birt }}
+        run: ./releng/fetch-birt.sh "$BIRT_DIR" "${{ matrix.birt }}"
+
+      - name: Сборка и офлайн-тесты
+        run: |
+          set -e
+          export ECLIPSE_HOME="$BIRT_DIR"
+          export JAVAC="$JAVA_HOME/bin/javac"
+          export JAR="$JAVA_HOME/bin/jar"
+          export JAVA="$JAVA_HOME/bin/java"
+          export JAVAC_OPTS="${{ matrix.javac_opts }}"
+          ./releng/test.sh
+
+      - name: Приёмка агентного цикла с рендером (classicmodels/Derby)
+        if: matrix.birt == '4.25'
+        run: |
+          set -e
+          export ECLIPSE_HOME="$BIRT_DIR"
+          export JAVA="$JAVA_HOME/bin/java"
+          export JAVAC="$JAVA_HOME/bin/javac"
+          export JAR="$JAVA_HOME/bin/jar"
+          mkdir -p build/sampledb
+          SRC=$(ls "$BIRT_DIR"/plugins/org.eclipse.birt.report.data.oda.sampledb_*.jar 2>/dev/null | grep -v source | head -1 || true)
+          if [ -n "$SRC" ] && unzip -l "$SRC" | grep -q "db/BirtSample.jar"; then
+            unzip -o -j "$SRC" 'db/BirtSample.jar' -d build/sampledb >/dev/null
+            DERBY_JAR="$PWD/build/sampledb/BirtSample.jar" ./releng/agent-selftest.sh
+          else
+            echo "sampledb без BirtSample.jar — приёмка рендера пропущена"
+          fi
+
+      - name: Сводка
+        if: always()
+        run: |
+          {
+            echo "## CI: BIRT ${{ matrix.birt }} / JDK ${{ matrix.java }}"
+            echo "Сборка + офлайн-тесты (счётчик проверок — в логе шага выше)."
+          } >> "$GITHUB_STEP_SUMMARY"

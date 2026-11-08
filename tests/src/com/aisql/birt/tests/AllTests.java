@@ -34,11 +34,21 @@ public final class AllTests {
         ChatHistoryTest.run();
         AuditLogTest.run();
         LlmClientTest.run();
+        LlmClientToolsTest.run();
         ReportSpecTest.run();
         ReportBuilderTest.run();
         SpecDiffTest.run();
         BuiltReportsTest.run();
         DbSchemaTest.run();
+        DesignSessionTest.run();
+        ToolProtocolTest.run();
+        ReportToolsTest.run();
+        ReportIntrospectorTest.run();
+        AgentSessionTest.run();
+        PiiDetectorTest.run();
+        PromptInjectionDefenseTest.run();
+        EnterprisePolicyTest.run();
+        AuditChainTest.run();
 
         int code = T.summary();
         System.out.println(code == 0 ? "ИТОГ: все проверки пройдены." : "ИТОГ: есть ошибки.");

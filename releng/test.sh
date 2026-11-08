@@ -27,7 +27,7 @@ find "$ROOT/tests/src" -name '*.java' | sort > "$ROOT/build/test-sources.txt"
 
 echo
 echo "== Компиляция тестов ($("$JAVAC" -version 2>&1)) =="
-"$JAVAC" -source 8 -target 8 -encoding UTF-8 -Xlint:-options \
+"$JAVAC" ${JAVAC_OPTS:--source 8 -target 8} -encoding UTF-8 -Xlint:-options \
     -cp "$CP" -d "$TEST_OUT" "@$ROOT/build/test-sources.txt"
 
 echo "== Запуск тестов =="

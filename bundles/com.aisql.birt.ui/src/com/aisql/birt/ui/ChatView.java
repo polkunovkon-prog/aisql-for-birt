@@ -21,13 +21,18 @@ import com.aisql.birt.core.BirtSettings;
 import com.aisql.birt.core.ChatHistory;
 import com.aisql.birt.core.ChatMessage;
 import com.aisql.birt.core.LlmClient;
+import com.aisql.birt.core.agent.AgentSession;
 import com.aisql.birt.core.jdbc.DbSchema;
 import com.aisql.birt.core.report.BuiltReports;
+import com.aisql.birt.core.report.DesignSession;
 import com.aisql.birt.core.report.ReportBuilder;
 import com.aisql.birt.core.report.ReportPreview;
 import com.aisql.birt.core.spec.ReportSpec;
 import com.aisql.birt.core.spec.SpecDiff;
 import com.aisql.birt.core.spec.SpecPrompts;
+import com.aisql.birt.core.tools.ToolContext;
+import com.aisql.birt.core.tools.ToolRegistry;
+import com.aisql.birt.core.tools.ToolResult;
 
 import java.io.File;
 import java.io.IOException;
@@ -106,6 +111,8 @@ public class ChatView extends ViewPart {
     private Text input;
     private Button sendButton;
     private Button specButton;
+    private Button agentButton;
+    private Button agentEditButton;
     private Button editButton;
     private Button buildButton;
     private Button previewButton;
@@ -243,6 +250,28 @@ public class ChatView extends ViewPart {
             @Override
             public void widgetSelected(SelectionEvent e) {
                 generateSpec();
+            }
+        });
+
+        agentButton = new Button(actions, SWT.PUSH);
+        agentButton.setText("Конструктор (агент)…");
+        agentButton.setToolTipText("ТЗ → агент собирает отчёт пошагово инструментами"
+            + " (транзакции Design API, валидация каждого шага)");
+        agentButton.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                agentBuild();
+            }
+        });
+
+        agentEditButton = new Button(actions, SWT.PUSH);
+        agentEditButton.setText("Правка (агент)…");
+        agentEditButton.setToolTipText("Выбрать любой .rptdesign → агент изучает структуру"
+            + " и правит по замечанию из поля ввода");
+        agentEditButton.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                agentEdit();
             }
         });
 
@@ -569,6 +598,210 @@ public class ChatView extends ViewPart {
         };
         job.setUser(true);
         job.schedule();
+    }
+
+    // ------------------------------------------------------------------
+    // Агентный режим: ТЗ → пошаговая сборка инструментами (ADR-0003)
+    // ------------------------------------------------------------------
+
+    /**
+     * «Конструктор (агент)…»: ТЗ из поля ввода → агент вызывает инструменты
+     * (report_new, add_*, report_validate, report_done); каждый вызов —
+     * транзакция Design API; прогресс пишется в чат.
+     */
+    private void agentBuild() {
+        if (busy || input == null || input.isDisposed()) {
+            return;
+        }
+        final String tz = input.getText() == null ? "" : input.getText().trim();
+        if (tz.isEmpty()) {
+            setStatusText("Опишите отчёт в поле ввода, затем нажмите «Конструктор (агент)…».");
+            beepAndFocusInput();
+            return;
+        }
+        input.setText("");
+        appendParagraph("Вы (ТЗ отчёта):", tz, false);
+
+        FileDialog dialog = new FileDialog(getSite().getShell(), SWT.SAVE);
+        dialog.setText("Куда сохранить файл отчёта (агент)");
+        dialog.setFileName("report.rptdesign");
+        dialog.setFilterExtensions(new String[] {"*.rptdesign", "*.*"});
+        dialog.setFilterNames(new String[] {"Отчёт BIRT (*.rptdesign)", "Все файлы"});
+        File defaultDir = defaultReportDir();
+        if (defaultDir != null) {
+            dialog.setFilterPath(defaultDir.getAbsolutePath());
+        }
+        String path = dialog.open();
+        if (path == null) {
+            return;
+        }
+        if (!path.toLowerCase().endsWith(".rptdesign")) {
+            path = path + ".rptdesign";
+        }
+        final File target = new File(path);
+        if (target.exists() && !confirmOverwrite(target)) {
+            return;
+        }
+        if (isEditorDirty(target)) {
+            setStatusText("В редакторе отчёта есть несохранённые изменения — "
+                + "сохраните их или закройте редактор и повторите.");
+            return;
+        }
+        runAgent(tz, null, target);
+    }
+
+    /**
+     * «Правка (агент)…»: выбор любого .rptdesign → агент открывает его
+     * (report_open), изучает структуру (report_inspect) и правит по
+     * замечанию из поля ввода.
+     */
+    private void agentEdit() {
+        if (busy || input == null || input.isDisposed()) {
+            return;
+        }
+        final String remark = input.getText() == null ? "" : input.getText().trim();
+        if (remark.isEmpty()) {
+            setStatusText("Опишите замечание в поле ввода, затем нажмите «Правка (агент)…».");
+            beepAndFocusInput();
+            return;
+        }
+        if (!com.aisql.birt.core.security.BirtEnterprisePolicy.editExistingAllowed()) {
+            setStatusText("Правка существующих отчётов запрещена политикой предприятия.");
+            return;
+        }
+        FileDialog dialog = new FileDialog(getSite().getShell(), SWT.OPEN);
+        dialog.setText("Какой отчёт править (агент)");
+        dialog.setFilterExtensions(new String[] {"*.rptdesign", "*.*"});
+        dialog.setFilterNames(new String[] {"Отчёт BIRT (*.rptdesign)", "Все файлы"});
+        File defaultDir = defaultReportDir();
+        if (defaultDir != null) {
+            dialog.setFilterPath(defaultDir.getAbsolutePath());
+        }
+        String path = dialog.open();
+        if (path == null) {
+            return;
+        }
+        final File target = new File(path);
+        if (isEditorDirty(target)) {
+            setStatusText("В редакторе отчёта есть несохранённые изменения — "
+                + "сохраните их или закройте редактор и повторите.");
+            return;
+        }
+        input.setText("");
+        appendParagraph("Вы (правка отчёта " + target.getName() + "):", remark, false);
+        String task = "Правка существующего отчёта.\nФайл: " + target.getAbsolutePath()
+            + "\nЗамечание: " + remark;
+        runAgent(task, target, target);
+    }
+
+    /** Общий запуск агентного цикла (после выбора файла и ТЗ). */
+    private void runAgent(final String task, final File fileToOpen, final File target) {
+        // Пароль базы: спросим заранее (агент его не видит, он уходит
+        // только в свойства источника при сборке).
+        String password = null;
+        DbPasswordDialog dialogPw = new DbPasswordDialog(getSite().getShell(),
+            BirtSettings.dbDriver(), BirtSettings.dbUrl(), BirtSettings.dbUser());
+        if (dialogPw.open() != Window.OK) {
+            setStatusText("Агент отменён: пароль не введён.");
+            return;
+        }
+        password = dialogPw.getPassword();
+        final String dbPassword = password;
+        final String model = BirtSettings.model();
+        final boolean sendTools = !"off".equals(BirtSettings.agentNativeTools());
+
+        setBusy(true, "Агент «" + model + "» собирает отчёт (инструменты)…");
+        uiAppend("Агент запущен:", "Цель: " + target.getName()
+            + (fileToOpen != null ? " (правка существующего)" : "")
+            + ". Ход работы — ниже; каждый шаг — транзакция Design API"
+            + " с проверкой.", false);
+
+        Job job = new Job("Агентная сборка отчёта (BIRT)") {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                long started = System.currentTimeMillis();
+                final DesignSession session = new DesignSession(AuditLog.sessionId());
+                final ToolContext ctx = new ToolContext(session, target, dbPassword);
+                ctx.listener = new ToolContext.ProgressListener() {
+                    public void onTool(String toolName, ToolResult result,
+                            int index, int total) {
+                        final String line = "→ " + toolName + ": "
+                            + (result.ok ? "ок" : "ошибка — " + result.summary());
+                        uiAppendQuiet(line);
+                        setBusy(false, null);
+                        setBusy(true, "Агент: " + toolName + "…");
+                    }
+                };
+                try {
+                    LlmClient client = LlmClient.fromSettings();
+                    AgentSession agent = new AgentSession(
+                        new AgentSession.LlmClientAdapter(client, sendTools),
+                        new ToolRegistry(), ctx);
+                    AgentSession.AgentResult r = agent.run(task);
+                    long ms = System.currentTimeMillis() - started;
+
+                    if (r.refusal != null) {
+                        uiAppend("Агент остановлен:", r.refusal, true);
+                        setBusy(false, "Агент остановлен (защита).");
+                        return Status.OK_STATUS;
+                    }
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(r.message == null ? "" : r.message).append('\n');
+                    sb.append("Вызовов инструментов: ").append(r.toolCalls)
+                        .append(" (ошибок: ").append(r.toolErrors)
+                        .append(", итераций: ").append(r.iterations).append(").");
+                    if (r.savedFile != null) {
+                        sb.append("\nФайл: ").append(r.savedFile.getAbsolutePath());
+                        boolean opened = reloadEditor(r.savedFile);
+                        sb.append(opened
+                            ? "\nОткрыт в редакторе BIRT."
+                            : "\nОткройте файл командой «Открыть с помощью → Report Editor».");
+                        if (!opened) {
+                            offerOpenFolder(r.savedFile);
+                        }
+                        // Манифест сессии — как «спецификация» для предпросмотра
+                        // (параметры/источники; тело агент строит сам).
+                        ReportSpec agentSpec = null;
+                        try {
+                            agentSpec = ctx.session.manifest();
+                        } catch (RuntimeException ignore) {
+                            // сессия уже закрыта — без спецификации
+                        }
+                        lastBuild = new BuildState(r.savedFile, agentSpec, dbPassword);
+                    }
+                    uiAppend("Агент завершён (" + seconds(ms) + "):", sb.toString(), false);
+                    setBusy(false, "Агент завершил работу (" + seconds(ms) + ").");
+                } catch (Throwable t) {
+                    long ms = System.currentTimeMillis() - started;
+                    String message = t.getMessage() == null
+                        ? t.getClass().getSimpleName() : t.getMessage();
+                    AuditLog.append("agent", "error", "ERROR", ms, model, message, null);
+                    uiAppend("Ошибка агента:", message, true);
+                    setBusy(false, "Не удалось завершить агентный цикл.");
+                } finally {
+                    session.close();
+                }
+                return Status.OK_STATUS;
+            }
+        };
+        job.setUser(true);
+        job.schedule();
+    }
+
+    /** Тихая строка прогресса (без заголовка). */
+    private void uiAppendQuiet(final String line) {
+        if (display == null || display.isDisposed()) {
+            return;
+        }
+        display.asyncExec(new Runnable() {
+            public void run() {
+                if (transcript == null || transcript.isDisposed()) {
+                    return;
+                }
+                transcript.append(line + "\n");
+                transcript.setTopIndex(transcript.getLineCount() - 1);
+            }
+        });
     }
 
     // ------------------------------------------------------------------

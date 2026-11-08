@@ -662,6 +662,24 @@ public final class ReportSpec {
         this.body = Collections.unmodifiableList(body);
     }
 
+    /**
+     * Собирает спецификацию из уже проверенных фрагментов (манифест
+     * DesignSession в агентном режиме). Списи копируются; элементы должны
+     * быть заранее провалидированы parse*Fragment.
+     */
+    public static ReportSpec compose(String name, String title, Page page,
+            List<Parameter> parameters, List<DataSource> datasources,
+            List<DataSet> datasets, List<BodyElement> body) {
+        return new ReportSpec(
+            name == null || name.isEmpty() ? "report" : name,
+            title == null || title.isEmpty() ? name : title,
+            page,
+            new ArrayList<Parameter>(parameters),
+            new ArrayList<DataSource>(datasources),
+            new ArrayList<DataSet>(datasets),
+            new ArrayList<BodyElement>(body));
+    }
+
     public String name() { return name; }
     public String title() { return title; }
     public Page page() { return page; }
@@ -1040,6 +1058,239 @@ public final class ReportSpec {
             throw new SpecException("спецификация не принята", problems);
         }
         return new ReportSpec(name, title, page, parameters, datasources, datasets, body);
+    }
+
+    // ------------------------------------------------------------------
+    // Фрагменты: строгий разбор ОДНОГО элемента для агентных инструментов
+    // (ADR-0003). Проверки те же, что и у полной спецификации; перекрёстные
+    // ссылки (источники, параметры, колонки наборов) проверяются по спискам,
+    // переданным вызывающим кодом (манифест DesignSession).
+    // ------------------------------------------------------------------
+
+    /**
+     * Разбирает описание параметра отчёта (поля как в {@code parameters[]})
+     * с полным набором проверок.
+     */
+    public static Parameter parseParameterFragment(Map<String, Object> p) throws SpecException {
+        List<String> problems = new ArrayList<String>();
+        Parameter parsed = null;
+        if (p == null) {
+            problems.add("параметр должен быть объектом");
+        } else {
+            checkUnknown(p, problems, "параметр", "name", "type", "prompt", "default");
+            String pn = strField(p, "name", true, problems, "параметр");
+            String pt = strField(p, "type", true, problems, "параметр");
+            String pp = strField(p, "prompt", false, problems, "параметр");
+            Object defRaw = p.get("default");
+            if (pn != null && !matchesName(pn)) {
+                problems.add("параметр.name «" + pn + "»: недопустимое имя");
+                pn = null;
+            }
+            if (pt != null && !TYPES.contains(pt)) {
+                problems.add("параметр.type «" + pt + "»: допустимы " + TYPES);
+                pt = null;
+            }
+            if (defRaw != null && !(defRaw instanceof String)) {
+                problems.add("параметр.default должен быть строкой");
+            }
+            if (pn != null && pt != null) {
+                parsed = new Parameter(pn, pt, pp,
+                    defRaw == null ? null : String.valueOf(defRaw));
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new SpecException("параметр не принят", problems);
+        }
+        return parsed;
+    }
+
+    /**
+     * Разбирает описание JDBC-источника данных (поля как в
+     * {@code datasources[]}). Пароль допустим форматом, но агент его
+     * не присылает (см. SECURITY.md).
+     */
+    public static DataSource parseDataSourceFragment(Map<String, Object> p) throws SpecException {
+        List<String> problems = new ArrayList<String>();
+        DataSource parsed = null;
+        if (p == null) {
+            problems.add("источник данных должен быть объектом");
+        } else {
+            checkUnknown(p, problems, "источник", "name", "kind", "driver", "url", "user", "password");
+            String dn = strField(p, "name", true, problems, "источник");
+            String kind = strField(p, "kind", true, problems, "источник");
+            String driver = strField(p, "driver", true, problems, "источник");
+            String url = strField(p, "url", true, problems, "источник");
+            String user = strField(p, "user", true, problems, "источник");
+            String pw = strField(p, "password", false, problems, "источник");
+            if (kind != null && !"jdbc".equals(kind)) {
+                problems.add("источник.kind «" + kind + "»: поддерживается только «jdbc»");
+            }
+            if (dn != null && !matchesName(dn)) {
+                problems.add("источник.name «" + dn + "»: недопустимое имя");
+                dn = null;
+            }
+            if (url != null && !url.startsWith("jdbc:")) {
+                problems.add("источник.url должен начинаться с «jdbc:»");
+            }
+            if (dn != null && driver != null && url != null && user != null) {
+                parsed = new DataSource(dn, driver, url, user, pw);
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new SpecException("источник данных не принят", problems);
+        }
+        return parsed;
+    }
+
+    /**
+     * Разбирает описание набора данных (поля как в {@code datasets[]}).
+     * Перекрёстные ссылки: источник — из knownDataSources, имена параметров —
+     * из knownParameters; «?» в SQL должны совпадать со списком params.
+     */
+    public static DataSet parseDataSetFragment(Map<String, Object> p,
+            List<DataSource> knownDataSources, List<Parameter> knownParameters)
+            throws SpecException {
+        List<String> problems = new ArrayList<String>();
+        DataSet parsed = parseDataSetEntry(p, 1, knownDataSources, knownParameters, problems);
+        if (!problems.isEmpty()) {
+            throw new SpecException("набор данных не принят", problems);
+        }
+        return parsed;
+    }
+
+    /** Разбор одного набора данных (общий для полной спецификации и фрагментов). */
+    private static DataSet parseDataSetEntry(Map<String, Object> p, int i,
+            List<DataSource> datasources, List<Parameter> parameters,
+            List<String> problems) {
+        if (p == null) {
+            problems.add("datasets[" + i + "] должен быть объектом");
+            return null;
+        }
+        checkUnknown(p, problems, "datasets[" + i + "]",
+            "name", "datasource", "sql", "params", "columns");
+        String dn_ = strField(p, "name", true, problems, "datasets[" + i + "]");
+        String dsrc = strField(p, "datasource", true, problems, "datasets[" + i + "]");
+        String sql = strField(p, "sql", true, problems, "datasets[" + i + "]");
+        if (dn_ != null && !matchesName(dn_)) {
+            problems.add("datasets[" + i + "].name «" + dn_ + "»: недопустимое имя");
+            dn_ = null;
+        }
+        if (dsrc != null && findDataSource(datasources, dsrc) == null) {
+            problems.add("datasets[" + i + "].datasource «" + dsrc
+                + "»: источник данных не описан");
+        }
+        List<String> dParams = new ArrayList<String>();
+        if (sql != null) {
+            List<String> sqlProblems = ReadOnlySql.check(sql);
+            for (String s : sqlProblems) {
+                problems.add("datasets[" + i + "].sql: " + s);
+            }
+            int marks = countParamMarks(sql);
+            List<Object> prmRaw = arrField(p, "params", problems, "datasets[" + i + "]");
+            if (prmRaw == null) {
+                if (marks > 0) {
+                    problems.add("datasets[" + i + "]: в SQL " + marks
+                        + " знак(ов) «?», но список params пуст");
+                }
+            } else {
+                if (prmRaw.size() != marks) {
+                    problems.add("datasets[" + i + "]: в SQL " + marks
+                        + " знак(ов) «?», а в params — " + prmRaw.size());
+                }
+                int j = 0;
+                for (Object po : prmRaw) {
+                    j++;
+                    String pname = Json.asStr(po);
+                    if (pname == null) {
+                        problems.add("datasets[" + i + "].params[" + j
+                            + "] должен быть строкой (имя параметра отчёта)");
+                        continue;
+                    }
+                    if (findParameter(parameters, pname) == null) {
+                        problems.add("datasets[" + i + "].params[" + j + "] «" + pname
+                            + "»: параметр отчёта не описан");
+                    }
+                    dParams.add(pname);
+                }
+            }
+        }
+        List<DatasetColumn> dCols = new ArrayList<DatasetColumn>();
+        List<Object> colRaw = arrField(p, "columns", problems, "datasets[" + i + "]");
+        if (colRaw != null) {
+            int j = 0;
+            for (Object co : colRaw) {
+                j++;
+                Map<String, Object> c = Json.asObj(co);
+                if (c == null) {
+                    problems.add("datasets[" + i + "].columns[" + j
+                        + "] должен быть объектом");
+                    continue;
+                }
+                checkUnknown(c, problems, "datasets[" + i + "].columns[" + j + "]",
+                    "name", "type");
+                String cn = strField(c, "name", true, problems,
+                    "datasets[" + i + "].columns[" + j + "]");
+                String ct = strField(c, "type", false, problems,
+                    "datasets[" + i + "].columns[" + j + "]");
+                if (ct != null && !TYPES.contains(ct)) {
+                    problems.add("datasets[" + i + "].columns[" + j + "].type «" + ct
+                        + "»: допустимы " + TYPES);
+                    ct = null;
+                }
+                if (cn != null) {
+                    dCols.add(new DatasetColumn(cn, ct == null ? "string" : ct));
+                }
+            }
+        }
+        if (dn_ != null && dsrc != null && sql != null) {
+            return new DataSet(dn_, dsrc, sql, dParams, dCols);
+        }
+        return null;
+    }
+
+    /**
+     * Разбирает ОДИН элемент тела отчёта (label/table/grid/image/list/chart).
+     * Перекрёстные ссылки на наборы данных проверяются по knownDatasets.
+     */
+    public static BodyElement parseBodyFragment(Map<String, Object> e,
+            List<DataSet> knownDatasets) throws SpecException {
+        List<String> problems = new ArrayList<String>();
+        BodyElement parsed = null;
+        if (e == null) {
+            problems.add("элемент должен быть объектом");
+        } else {
+            String type = Json.asStr(e.get("type"));
+            if ("label".equals(type)) {
+                parsed = parseLabel(e, 1, problems);
+            } else if ("table".equals(type)) {
+                parsed = parseTable(e, 1, problems, knownDatasets);
+            } else if ("grid".equals(type)) {
+                parsed = parseGrid(e, 1, problems, knownDatasets);
+            } else if ("image".equals(type)) {
+                parsed = parseImage(e, 1, problems);
+            } else if ("list".equals(type)) {
+                parsed = parseList(e, 1, problems, knownDatasets);
+            } else if ("chart".equals(type)) {
+                parsed = parseChart(e, 1, problems, knownDatasets);
+            } else {
+                problems.add("type «" + type + "»: поддерживаются «label», «table»,"
+                    + " «grid», «image», «list» и «chart»");
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new SpecException("элемент не принят", problems);
+        }
+        return parsed;
+    }
+
+    /** Разбирает параметры страницы (поля как в {@code report.page}). */
+    public static Page parsePageFragment(Map<String, Object> p) throws SpecException {
+        List<String> problems = new ArrayList<String>();
+        Page parsed = parsePage(p, problems);
+        if (!problems.isEmpty()) {
+            throw new SpecException("параметры страницы не приняты", problems);
+        }
+        return parsed;
     }
 
     private static Page parsePage(Map<String, Object> p, List<String> problems) {

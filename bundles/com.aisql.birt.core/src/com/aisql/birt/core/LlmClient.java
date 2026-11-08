@@ -9,6 +9,8 @@
  */
 package com.aisql.birt.core;
 
+import com.aisql.birt.core.tools.ToolCall;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -82,39 +84,155 @@ public final class LlmClient {
      * Блокирующий вызов — запускайте в фоновом потоке.
      */
     public String chat(List<ChatMessage> messages, double temperature, int maxTokens) throws LlmException {
+        LlmResponse r = chatInternal(messages, null, temperature, maxTokens);
+        if (r.toolCalls != null && !r.toolCalls.isEmpty()) {
+            // текстовый канал без tools: модель всё равно прислала вызовы —
+            // не теряем их, но и не выполняем здесь (это компетенция агента)
+            return r.content == null || r.content.isEmpty()
+                ? "" : r.content;
+        }
+        if (r.content == null || r.content.trim().isEmpty()) {
+            throw emptyResponse(r.finishReason);
+        }
+        return r.content.trim();
+    }
+
+    /**
+     * Агентный запрос: с описаниями инструментов. Поддерживает оба канала
+     * вызова: штатный tool calling (в ответе tool_calls) и текстовый
+     * протокол (строки «TOOL …» в содержимом).
+     *
+     * @param tools список описаний инструментов (формат OpenAI tools)
+     * @param sendTools false — не передавать tools в запрос (текстовый
+     *                  протокол; для серверов без поддержки)
+     */
+    public LlmResponse chatWithTools(List<ChatMessage> messages, List<Object> tools,
+                                     double temperature, int maxTokens, boolean sendTools)
+            throws LlmException {
+        return chatInternal(messages, sendTools ? tools : null, temperature, maxTokens);
+    }
+
+    /** Ответ модели: текст, вызовы инструментов и причина завершения. */
+    public static final class LlmResponse {
+
+        /** Текст ответа (может быть пустым, если модель зовёт инструменты). */
+        public final String content;
+        /** Вызовы инструментов из tool_calls (может быть пустым). */
+        public final List<ToolCall> toolCalls;
+        /** Причина завершения: stop | tool_calls | length | … (может быть null). */
+        public final String finishReason;
+
+        LlmResponse(String content, List<ToolCall> toolCalls, String finishReason) {
+            this.content = content;
+            this.toolCalls = toolCalls == null
+                ? new ArrayList<ToolCall>() : toolCalls;
+            this.finishReason = finishReason;
+        }
+
+        /** Создание ответа вручную (для тестов и актёров). */
+        public static LlmResponse of(String content, List<ToolCall> toolCalls,
+                String finishReason) {
+            return new LlmResponse(content, toolCalls, finishReason);
+        }
+
+        public boolean hasToolCalls() {
+            return !toolCalls.isEmpty();
+        }
+
+        /** Вызовы из текстового протокола, если штатных нет. */
+        public List<ToolCall> allToolCalls() {
+            if (hasToolCalls()) {
+                return toolCalls;
+            }
+            return ToolCall.parseTextProtocol(content);
+        }
+    }
+
+    private LlmException emptyResponse(String finishReason) {
+        if (finishReason != null && !finishReason.isEmpty()) {
+            return new LlmException("Модель не вернула текст (finish_reason=" + finishReason
+                + "). Попробуйте переформулировать запрос или увеличить llm.maxTokens.");
+        }
+        return new LlmException("Не удалось разобрать ответ модели: "
+            + "(пустой ответ)");
+    }
+
+    private LlmResponse chatInternal(List<ChatMessage> messages, List<Object> tools,
+                                     double temperature, int maxTokens) throws LlmException {
         Map<String, Object> request = Json.obj();
         request.put("model", model);
         List<Object> msgs = Json.arr();
         for (ChatMessage m : messages) {
-            Map<String, Object> item = Json.obj();
-            item.put("role", m.getRole());
-            item.put("content", m.getContent());
-            msgs.add(item);
+            msgs.add(serializeMessage(m));
         }
         request.put("messages", msgs);
         request.put("temperature", Double.valueOf(temperature));
         request.put("stream", Boolean.FALSE);
+        if (tools != null && !tools.isEmpty()) {
+            request.put("tools", tools);
+            request.put("tool_choice", "auto");
+        }
         if (maxTokens > 0) {
             request.put("max_tokens", Integer.valueOf(maxTokens));
         }
 
         String response = request("POST", "/chat/completions", Json.write(request));
         Object root = parseJson(response);
-        Object content = Json.at(root, "choices", Integer.valueOf(0), "message", "content");
-        if (content == null) {
+        Object messageObj = Json.at(root, "choices", Integer.valueOf(0), "message");
+        String finish = Json.asStr(Json.at(root, "choices", Integer.valueOf(0), "finish_reason"));
+        String text = textOf(messageObj == null ? null
+            : Json.at(messageObj, "content"));
+        if (text == null) {
             // Некоторые серверы отвечают в формате legacy completions.
-            content = Json.at(root, "choices", Integer.valueOf(0), "text");
+            text = textOf(Json.at(root, "choices", Integer.valueOf(0), "text"));
         }
-        String text = textOf(content);
-        if (text == null || text.trim().isEmpty()) {
-            String finish = Json.asStr(Json.at(root, "choices", Integer.valueOf(0), "finish_reason"));
-            if (finish != null) {
-                throw new LlmException("Модель не вернула текст (finish_reason=" + finish
-                    + "). Попробуйте переформулировать запрос или увеличить llm.maxTokens.");
+
+        List<ToolCall> calls = new ArrayList<ToolCall>();
+        Object rawCalls = messageObj == null ? null : Json.at(messageObj, "tool_calls");
+        List<Object> arr = Json.asArr(rawCalls);
+        if (arr != null) {
+            for (Object item : arr) {
+                String id = Json.asStr(Json.at(item, "id"));
+                String name = Json.asStr(Json.at(item, "function", "name"));
+                String args = Json.asStr(Json.at(item, "function", "arguments"));
+                if (name != null && !name.isEmpty()) {
+                    calls.add(new ToolCall(id, name,
+                        args == null || args.isEmpty() ? "{}" : args));
+                }
             }
-            throw new LlmException("Не удалось разобрать ответ модели: " + snippet(response));
         }
-        return text.trim();
+        return new LlmResponse(text, calls, finish);
+    }
+
+    /** Сериализует сообщение с учётом роли tool и tool_calls ассистента. */
+    private Object serializeMessage(ChatMessage m) {
+        Map<String, Object> item = Json.obj();
+        item.put("role", m.getRole());
+        if (ChatMessage.ROLE_TOOL.equals(m.getRole())) {
+            item.put("tool_call_id", m.getToolCallId() == null ? "" : m.getToolCallId());
+            item.put("content", m.getContent());
+            return item;
+        }
+        if (ChatMessage.ROLE_ASSISTANT.equals(m.getRole()) && !m.getToolCalls().isEmpty()) {
+            List<Object> rawCalls = Json.arr();
+            for (ToolCall c : m.getToolCalls()) {
+                Map<String, Object> fn = Json.obj();
+                fn.put("name", c.getName());
+                fn.put("arguments", c.getArgsJson());
+                Map<String, Object> call = Json.obj();
+                call.put("id", c.getId());
+                call.put("type", "function");
+                call.put("function", fn);
+                rawCalls.add(call);
+            }
+            item.put("tool_calls", rawCalls);
+            if (m.getContent() != null && !m.getContent().isEmpty()) {
+                item.put("content", m.getContent());
+            }
+            return item;
+        }
+        item.put("content", m.getContent());
+        return item;
     }
 
     /** Список моделей сервера (GET /models) — для кнопки «Проверить соединение». */

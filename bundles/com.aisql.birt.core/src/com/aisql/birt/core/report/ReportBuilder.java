@@ -218,7 +218,7 @@ public final class ReportBuilder {
     // ------------------------------------------------------------------
     // Страница
     // ------------------------------------------------------------------
-    private static void applyPage(ReportDesignHandle design, ElementFactory factory,
+    public static void applyPage(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec) throws Exception {
         if (spec.page() == null) {
             return;
@@ -361,7 +361,7 @@ public final class ReportBuilder {
     // Источники данных
     // ------------------------------------------------------------------
 
-    private static void applyDataSources(ReportDesignHandle design, ElementFactory factory,
+    public static void applyDataSources(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec, String passwordOverride) throws Exception {
         for (ReportSpec.DataSource src : spec.datasources()) {
             OdaDataSourceHandle ds = factory.newOdaDataSource(src.name(), ODA_JDBC_DATA_SOURCE);
@@ -380,7 +380,7 @@ public final class ReportBuilder {
     // Параметры
     // ------------------------------------------------------------------
 
-    private static void applyParameters(ReportDesignHandle design, ElementFactory factory,
+    public static void applyParameters(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec) throws Exception {
         for (ReportSpec.Parameter p : spec.parameters()) {
             ScalarParameterHandle param = factory.newScalarParameter(p.name());
@@ -404,7 +404,7 @@ public final class ReportBuilder {
     // Наборы данных
     // ------------------------------------------------------------------
 
-    private static void applyDataSets(ReportDesignHandle design, ElementFactory factory,
+    public static void applyDataSets(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec) throws Exception {
         for (ReportSpec.DataSet dataSet : spec.datasets()) {
             OdaDataSetHandle q = factory.newOdaDataSet(dataSet.name(), ODA_JDBC_DATA_SET);
@@ -471,7 +471,7 @@ public final class ReportBuilder {
     // Содержимое
     // ------------------------------------------------------------------
 
-    private static void applyBody(ReportDesignHandle design, ElementFactory factory,
+    public static void applyBody(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec) throws Exception {
         int labelIndex = 0;
         int tableIndex = 0;
@@ -509,7 +509,7 @@ public final class ReportBuilder {
     }
 
     /** Сетка grid: строки ячеек со спанами. */
-    private static GridHandle createGrid(ElementFactory factory, ReportSpec.Grid el, String name)
+    public static GridHandle createGrid(ElementFactory factory, ReportSpec.Grid el, String name)
             throws Exception {
         List<Double> widths = el.columnWidthsMm();
         int cols = widths.size();
@@ -585,7 +585,7 @@ public final class ReportBuilder {
     }
 
     /** Изображение: встроенный PNG (base64) или импорт из файла. */
-    private static ImageHandle createImage(ReportDesignHandle design,
+    public static ImageHandle createImage(ReportDesignHandle design,
             ElementFactory factory, ReportSpec.Image el, String name)
             throws Exception {
         ImageHandle handle = factory.newImage(name);
@@ -624,7 +624,7 @@ public final class ReportBuilder {
      * колонок набора данных. Без boundDataColumns движок не находит
      * row["..."], и диаграмма пустая.
      */
-    private static ExtendedItemHandle createChart(ReportDesignHandle design,
+    public static ExtendedItemHandle createChart(ReportDesignHandle design,
             ElementFactory factory, ReportSpec spec, ReportSpec.Chart el, String name)
             throws Exception {
         ExtendedItemHandle item = factory.newExtendedItem(name, "Chart");
@@ -662,7 +662,7 @@ public final class ReportBuilder {
         return item;
     }
 
-    private static LabelHandle createLabel(ElementFactory factory, ReportSpec.Label el, String name)
+    public static LabelHandle createLabel(ElementFactory factory, ReportSpec.Label el, String name)
             throws Exception {
         LabelHandle label = factory.newLabel(name);
         label.setText(el.text());
@@ -687,7 +687,7 @@ public final class ReportBuilder {
         return label;
     }
 
-    private static TableHandle createTable(ReportDesignHandle design, ElementFactory factory,
+    public static TableHandle createTable(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec, ReportSpec.Table el, String name) throws Exception {
         List<ReportSpec.TableColumn> cols = el.columns();
         TableHandle table = factory.newTableItem(name, cols.size());
@@ -1080,7 +1080,7 @@ public final class ReportBuilder {
      * сортировки и итогов — та же, что у таблицы (boundDataColumns, SortKey,
      * aggregateFunction/arg); отличается только контейнер (ListGroup).
      */
-    private static ListHandle createList(ReportDesignHandle design, ElementFactory factory,
+    public static ListHandle createList(ReportDesignHandle design, ElementFactory factory,
             ReportSpec spec, ReportSpec.ListElement el, String name) throws Exception {
         List<ReportSpec.TableColumn> cols = el.columns();
         ListHandle list = factory.newList(name);

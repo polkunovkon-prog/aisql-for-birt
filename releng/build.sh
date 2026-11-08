@@ -44,12 +44,13 @@ echo "== Сборка AI BIRT v$VERSION =="
 echo "Eclipse: $ECLIPSE_HOME"
 echo "JDK:     $("$JAVAC" -version 2>&1)"
 
-# Classpath: все jar-ы плагинов Eclipse + вложенные jar-ы отдельных бандлов
-# (интерфейсы JDBC-ODA лежат в org.eclipse.birt.report.data.oda.jdbc/oda-jdbc.jar).
-CP="$(find "$PLUGINS_DIR" -maxdepth 1 -name '*.jar' | sort | tr '\n' ':')"
+# Classpath: wildcard по каталогу плагинов (java сама разворачивает «dir/*»
+# во все jar-файлы — это обходит лимит длины аргумента на больших установках,
+# например BIRT 4.25 с 1600+ бандлами) + вложенный oda-jdbc.jar (BIRT 4.7).
+CP="$PLUGINS_DIR/*"
 ODA_JAR="$(ls -d "$PLUGINS_DIR"/org.eclipse.birt.report.data.oda.jdbc_*/oda-jdbc.jar 2>/dev/null | head -1 || true)"
 if [ -n "$ODA_JAR" ]; then
-    CP="$CP$ODA_JAR:"
+    CP="$CP:$ODA_JAR"
 fi
 DEPS_CP=""
 
@@ -76,7 +77,9 @@ for BUNDLE in com.aisql.birt.core com.aisql.birt.ui; do
         echo "== Пропускаю $BUNDLE (нет исходников) =="
         continue
     fi
-    "$JAVAC" -source 8 -target 8 -encoding UTF-8 -Xlint:-options \
+    # JAVAC_OPTS позволяет собирать современным javac (например, 21 с
+    # --release 8 против BIRT 4.25), не меняя байт-код совместимости Java 8.
+    "$JAVAC" ${JAVAC_OPTS:--source 8 -target 8} -encoding UTF-8 -Xlint:-options \
         -cp "$CP$DEPS_CP" -d "$CLASSES" "@$OUT/$BUNDLE/sources.txt"
     DEPS_CP="$DEPS_CP:$CLASSES"
 
