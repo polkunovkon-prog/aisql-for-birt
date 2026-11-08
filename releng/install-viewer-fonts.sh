@@ -13,9 +13,10 @@
 # Перезапуск Eclipse после подключения обязателен.
 #
 set -euo pipefail
+_AIBIRT_JDK8="${JDK8_HOME:-$(ls -d "$HOME"/opt/jdk8* 2>/dev/null | head -1)}"
 
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
-DEFAULT_VM="/home/pka/opt/jdk8u504-b01/bin/java"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
+DEFAULT_VM="${_AIBIRT_JDK8}/bin/java"
 SRC="/usr/share/fonts/truetype/dejavu"
 
 [ -d "$ECLIPSE_HOME" ] || { echo "ОШИБКА: нет каталога Eclipse: $ECLIPSE_HOME" >&2; exit 2; }

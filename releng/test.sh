@@ -10,8 +10,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-JAVAC="${JAVAC:-/home/pka/opt/jdk8u504-b01/bin/javac}"
-JAVA="${JAVA:-/home/pka/opt/jdk8u504-b01/bin/java}"
+_AIBIRT_JDK8="${JDK8_HOME:-$(ls -d "$HOME"/opt/jdk8* 2>/dev/null | head -1)}"
+JAVAC="${JAVAC:-${_AIBIRT_JDK8}/bin/javac}"
+JAVA="${JAVA:-${_AIBIRT_JDK8}/bin/java}"
 
 echo "== Сборка бандлов =="
 "$ROOT/releng/build.sh" | tail -5

@@ -4,7 +4,7 @@
 # компиляция javac против jar-ов установленного Eclipse 4.7 и упаковка в jar.
 #
 # Использование:
-#   ./releng/build.sh                        # автоопределение /home/pka/eclipse
+#   ./releng/build.sh                        # автоопределение $HOME/eclipse
 #   ECLIPSE_HOME=/opt/eclipse ./releng/build.sh
 #
 # Компилятор по умолчанию — Temurin 8 (Eclipse 4.7 работает только на Java 8,
@@ -18,10 +18,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
+_AIBIRT_JDK8="${JDK8_HOME:-$(ls -d "$HOME"/opt/jdk8* 2>/dev/null | head -1)}"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
 PLUGINS_DIR="${PLUGINS_DIR:-$ECLIPSE_HOME/plugins}"
-JAVAC="${JAVAC:-/home/pka/opt/jdk8u504-b01/bin/javac}"
-JAR="${JAR:-/home/pka/opt/jdk8u504-b01/bin/jar}"
+JAVAC="${JAVAC:-${_AIBIRT_JDK8}/bin/javac}"
+JAR="${JAR:-${_AIBIRT_JDK8}/bin/jar}"
 
 OUT="$ROOT/build"
 DIST="$ROOT/dist"

@@ -14,13 +14,13 @@
 #   5) проверяет загрузку плагина headless-запуском под xvfb: ищет в журнале
 #      рабочей области строку «AI BIRT UI plugin started».
 #
-# Переменные: ECLIPSE_HOME (по умолчанию /home/pka/eclipse).
+# Переменные: ECLIPSE_HOME (по умолчанию $HOME/eclipse).
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
 LAUNCHER="$ECLIPSE_HOME/eclipse"
 CONFIG_DIR="$ECLIPSE_HOME/configuration"
 BUNDLES_INFO="$CONFIG_DIR/org.eclipse.equinox.simpleconfigurator/bundles.info"
@@ -167,7 +167,7 @@ info "Готово"
 cat <<'EOF'
 Плагин установлен. Что дальше:
 
-  1. Запустите Eclipse (/home/pka/eclipse/eclipse).
+  1. Запустите Eclipse ($HOME/eclipse/eclipse).
   2. Откройте панель: Window → Show View → ИИ для BIRT → «ИИ-конструктор отчётов»
      (в перспективе BIRT «Отчёт» панель добавляется рядом с Outline).
   3. Настройки подключения: Window → Preferences → «ИИ-конструктор отчётов (BIRT)»

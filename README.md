@@ -78,9 +78,9 @@ Java 21)** — один набор офлайн-тестов (**691 провер
 
 | Компонент | Где на этой машине |
 |---|---|
-| Eclipse 4.7 IDE + BIRT 4.7 (дизайнер отчётов) | `/home/pka/eclipse` |
+| Eclipse 4.7 IDE + BIRT 4.7 (дизайнер отчётов) | `~/eclipse` |
 | (альтернатива для тестов без Eclipse) BIRT 4.7/4.25 jar-ы | `./releng/fetch-birt.sh <каталог> 4.7\|4.25` |
-| Java 8 для работы Eclipse (4.7 не работает на новых Java) | Temurin 8: `/home/pka/opt/jdk8u504-b01`, прописан в `eclipse.ini` |
+| Java 8 для работы Eclipse (4.7 не работает на новых Java) | Temurin 8: `~/opt/jdk8u504-b01`, прописан в `eclipse.ini` |
 | JDK 8 для сборки плагина | тот же Temurin 8 |
 | `xvfb` — контрольный запуск при установке | установлен (`xvfb-run`) |
 | ИИ-сервер, совместимый с OpenAI API | локальная модель в сети (адрес в настройках) |
@@ -97,7 +97,7 @@ Java 21)** — один набор офлайн-тестов (**691 провер
 
 Затем:
 
-1. запустите Eclipse: `/home/pka/eclipse/eclipse`;
+1. запустите Eclipse: `~/eclipse/eclipse`;
 2. откройте панель: `Window → Show View → ИИ для BIRT → «ИИ-конструктор отчётов»`;
 3. при необходимости поправьте подключение: `Window → Preferences → «ИИ-конструктор отчётов (BIRT)»`.
 
@@ -138,7 +138,7 @@ docs/                         — INSTALL, USAGE, TESTING, SECURITY, ROADMAP,
 
 | ключ | смысл | по умолчанию |
 |---|---|---|
-| `llm.baseUrl` | адрес OpenAI-совместимого сервера (`…/v1`) | `http://192.168.100.152:8888/v1` |
+| `llm.baseUrl` | адрес OpenAI-совместимого сервера (`…/v1`) | `http://127.0.0.1:8888/v1` |
 | `llm.model` | идентификатор модели | `ornith-ai/Ornith-1.5-35B-A3B-GGUF` |
 | `llm.token` | ключ доступа; пусто — запросы без `Authorization` | — |
 | `llm.temperature` | температура генерации (0…2) | `0.3` |

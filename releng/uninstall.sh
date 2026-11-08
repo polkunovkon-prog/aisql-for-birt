@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
 LAUNCHER="$ECLIPSE_HOME/eclipse"
 CONFIG_DIR="$ECLIPSE_HOME/configuration"
 BUNDLES_INFO="$CONFIG_DIR/org.eclipse.equinox.simpleconfigurator/bundles.info"

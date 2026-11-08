@@ -7,7 +7,7 @@
 #   CP="bundles/…:$(./releng/birt-classpath.sh)"
 #
 # Каталог Eclipse определяется переменной ECLIPSE_HOME (по умолчанию
-# /home/pka/eclipse). В classpath входит ВСЁ содержимое каталога plugins
+# $HOME/eclipse). В classpath входит ВСЁ содержимое каталога plugins
 # (wildcard «dir/*» — сам jar-файл каталога разворачивает, это штатная
 # возможность java/javac; снимает ограничение на длину одного аргумента
 # при больших установках, например BIRT 4.25 с 1600+ бандлами), плюс:
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
 P="$ECLIPSE_HOME/plugins"
 
 if [ ! -d "$P" ]; then

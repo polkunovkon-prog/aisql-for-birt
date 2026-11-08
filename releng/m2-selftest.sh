@@ -20,7 +20,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-JAVA="${JAVA:-/home/pka/opt/jdk8u504-b01/bin/java}"
+_AIBIRT_JDK8="${JDK8_HOME:-$(ls -d "$HOME"/opt/jdk8* 2>/dev/null | head -1)}"
+JAVA="${JAVA:-${_AIBIRT_JDK8}/bin/java}"
 OUT="${1:-/tmp/opencode/aibirt-m2-selftest}"
 EXPECT="${EXPECT:-Гриффиндор}"
 DB_URL="${DB_URL:-jdbc:postgresql://127.0.0.1:5432/hogwarts}"

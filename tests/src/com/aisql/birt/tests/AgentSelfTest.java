@@ -47,7 +47,7 @@ public final class AgentSelfTest {
         ToolContext ctx = new ToolContext(session, target, "");
 
         String derbyJar = args.length > 0 ? args[0]
-            : "/home/z/tools/birt47-sampledb/BirtSample.jar";
+            : "/tmp/birt47-sampledb/BirtSample.jar";
 
         check(call(registry, ctx, "report_new",
             "{\"name\":\"classicmodels\",\"title\":\"Классические модели — заказы\"}").ok,

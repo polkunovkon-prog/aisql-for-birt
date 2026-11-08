@@ -5,7 +5,7 @@
 # без ИИ-сервера (инструменты вызываются напрямую, как это сделала бы модель).
 #
 # Использование:
-#   ./releng/agent-selftest.sh            # BIRT из ECLIPSE_HOME (по умолчанию /home/pka/eclipse)
+#   ./releng/agent-selftest.sh            # BIRT из ECLIPSE_HOME (по умолчанию $HOME/eclipse)
 #   ECLIPSE_HOME=/path/to/birt425 JAVA=/path/to/jdk21/bin/java \
 #       DERBY_JAR=/path/to/BirtSample.jar ./releng/agent-selftest.sh
 #
@@ -19,8 +19,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ECLIPSE_HOME="${ECLIPSE_HOME:-/home/pka/eclipse}"
-JAVA="${JAVA:-/home/pka/opt/jdk8u504-b01/bin/java}"
+_AIBIRT_JDK8="${JDK8_HOME:-$(ls -d "$HOME"/opt/jdk8* 2>/dev/null | head -1)}"
+ECLIPSE_HOME="${ECLIPSE_HOME:-$HOME/eclipse}"
+JAVA="${JAVA:-${_AIBIRT_JDK8}/bin/java}"
 JAVAC="${JAVAC:-$(dirname "$JAVA")/javac}"
 JAR_BIN="${JAR:-$(dirname "$JAVA")/jar}"
 export JAR="$JAR_BIN"

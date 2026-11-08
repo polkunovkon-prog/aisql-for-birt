@@ -127,10 +127,10 @@ Headless-приложение плагина повторяет тот же ци
 (проверяет разрешение бандлов, точку расширения драйвера JDBC и эмиттеры):
 
 ```bash
-xvfb-run -a /home/pka/eclipse/eclipse \
+xvfb-run -a ~/eclipse/eclipse \
     -application com.aisql.birt.ui.aibirtSelftest -nosplash -consoleLog \
     -data /tmp/opencode/aibirt-eclipse-ws \
-    /home/pka/aisql-for-birt/tests/samples/students-by-house-groups.spec.json \
+    ~/aisql-for-birt/tests/samples/students-by-house-groups.spec.json \
     /tmp/opencode/aibirt-eclipse-groups
 ```
 
@@ -154,10 +154,10 @@ Created connection factory class com.aisql.birt.core.jdbc.PgJdbcConnectionFactor
 данных), поэтому их приёмка — только внутри Eclipse:
 
 ```bash
-AIBIRT_TEST_DB_PASSWORD='…' xvfb-run -a /home/pka/eclipse/eclipse \
+AIBIRT_TEST_DB_PASSWORD='…' xvfb-run -a ~/eclipse/eclipse \
     -application com.aisql.birt.ui.aibirtSelftest -nosplash -consoleLog \
     -data /tmp/opencode/aibirt-chart-ws \
-    /home/pka/aisql-for-birt/tests/samples/students-chart.spec.json \
+    ~/aisql-for-birt/tests/samples/students-chart.spec.json \
     /tmp/opencode/aibirt-chart-out
 ```
 
@@ -185,7 +185,7 @@ SELFTEST: LOG SEVERE=0 → RESULT OK (код 0)
 
 ### 3.5 Ручной чек-лист (GUI, для пользователя)
 
-1. **Запуск**: `/home/pka/eclipse/eclipse`; в `<workspace>/.metadata/.log`
+1. **Запуск**: `~/eclipse/eclipse`; в `<workspace>/.metadata/.log`
    должна быть строка `AI BIRT UI plugin started, version 0.7.0`,
    исключений нет.
 2. **Схема БД** (необязательно): «Схема БД…» → пароль `agent_user` →
@@ -289,7 +289,7 @@ agent-selftest с рендером.
   DejaVu/Liberation) штатным `EngineConfig.setFontConfig`. Просмотрщик
   Eclipse (`Run → View Report`) создаёт движок сам и настройку не
   принимает — для него шрифты подключены в JDK:
-  `/home/pka/opt/jdk8u504-b01/jre/lib/fonts` (симлинки на DejaVu; скрипт
+  `~/opt/jdk8u504-b01/jre/lib/fonts` (симлинки на DejaVu; скрипт
   `releng/install-viewer-fonts.sh`) — каталог `<java-home>/lib/fonts`
   движок BIRT регистрирует сам при каждом запуске. Отчёты, собранные до
   18.10.2026, не содержат `fontFamily` — в их PDF кириллицы не будет

@@ -62,7 +62,7 @@ public final class BirtSettings {
     public static final String KEY_SYSLOG_PORT = "audit.syslog.port";
     public static final String KEY_SYSLOG_APP = "audit.syslog.app";
 
-    public static final String DEFAULT_BASE_URL = "http://192.168.100.152:8888/v1";
+    public static final String DEFAULT_BASE_URL = "http://127.0.0.1:8888/v1";
     public static final String DEFAULT_MODEL = "ornith-ai/Ornith-1.5-35B-A3B-GGUF";
     public static final String DEFAULT_TOKEN = "";
     public static final double DEFAULT_TEMPERATURE = 0.3;

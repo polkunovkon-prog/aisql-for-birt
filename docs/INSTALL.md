@@ -13,9 +13,9 @@ JDK 8 против jar-ов установленного Eclipse и склады
 
 Переменные (если каталоги отличаются от стандартных на этой машине):
 
-- `ECLIPSE_HOME` — каталог Eclipse (по умолчанию `/home/pka/eclipse`);
+- `ECLIPSE_HOME` — каталог Eclipse (по умолчанию `~/eclipse`);
 - `JAVAC`, `JAR` — компилятор/упаковщик (по умолчанию Temurin 8
-  `/home/pka/opt/jdk8u504-b01/bin`).
+  `~/opt/jdk8u504-b01/bin`).
 
 ## 2. Установка
 
@@ -50,7 +50,7 @@ JDK 8 против jar-ов установленного Eclipse и склады
 
 ## 3. Первый запуск
 
-1. `/home/pka/eclipse/eclipse`
+1. `~/eclipse/eclipse`
 2. `Window → Show View → ИИ для BIRT → «ИИ-конструктор отчётов»`
 3. Настройки подключения: `Window → Preferences → «ИИ-конструктор отчётов (BIRT)»` —
    адрес сервера, модель, ключ; кнопка **«Проверить соединение»**.
@@ -79,7 +79,7 @@ JDK 8 против jar-ов установленного Eclipse и склады
 2. есть ли строки плагина в `bundles.info`:
 
    ```bash
-   grep com.aisql.birt /home/pka/eclipse/configuration/org.eclipse.equinox.simpleconfigurator/bundles.info
+   grep com.aisql.birt ~/eclipse/configuration/org.eclipse.equinox.simpleconfigurator/bundles.info
    ```
 
 3. при странностях — повторите `install.sh` (сброс кэшей) и перезапустите Eclipse.
@@ -90,7 +90,7 @@ JDK 8 против jar-ов установленного Eclipse и склады
 (`/tmp/opencode/aibirt-verify/workspace/.metadata/.log`) — скрипт их печатает.
 
 **Eclipse не запускается.** Проверьте `eclipse.ini` — в нём должен быть прописан
-Java 8 (`-vm /home/pka/opt/jdk8u504-b01/bin/java`). На новых Java (17+) Eclipse 4.7
+Java 8 (`-vm ~/opt/jdk8u504-b01/bin/java`). На новых Java (17+) Eclipse 4.7
 падает с `NoClassDefFoundError: javax/annotation/PostConstruct`.
 
 **Панель чата открылась, но запросы не уходят.** Кнопка «Проверить соединение»
